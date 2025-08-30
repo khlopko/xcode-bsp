@@ -20,12 +20,14 @@ private struct FileLogHandler: LogHandler {
     }
 
     init() throws {
-        let path = "/tmp/xcode-bsp/default.log"
-        if FileManager.default.fileExists(atPath: path) == false {
-            FileManager.default.createFile(atPath: path, contents: nil)
+        let tmpDirPath = "/tmp/xcode-bsp"
+        try FileManager.default.createDirectory(atPath: tmpDirPath, withIntermediateDirectories: false)
+        let logPath = tmpDirPath + "/default.log"
+        if FileManager.default.fileExists(atPath: logPath) == false {
+            FileManager.default.createFile(atPath: logPath, contents: nil)
         }
 
-        guard let fileHandle = FileHandle(forUpdatingAtPath: path) else {
+        guard let fileHandle = FileHandle(forUpdatingAtPath: logPath) else {
             throw InitializationError.noFileHandle
         }
 
