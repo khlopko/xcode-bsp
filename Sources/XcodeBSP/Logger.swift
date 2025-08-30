@@ -21,7 +21,9 @@ private struct FileLogHandler: LogHandler {
 
     init() throws {
         let tmpDirPath = "/tmp/xcode-bsp"
-        try FileManager.default.createDirectory(atPath: tmpDirPath, withIntermediateDirectories: false)
+        if FileManager.default.fileExists(atPath: tmpDirPath) == false {
+            try FileManager.default.createDirectory(atPath: tmpDirPath, withIntermediateDirectories: false)
+        }
         let logPath = tmpDirPath + "/default.log"
         if FileManager.default.fileExists(atPath: logPath) == false {
             FileManager.default.createFile(atPath: logPath, contents: nil)

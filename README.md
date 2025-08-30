@@ -5,7 +5,19 @@
 Xcode Build Server Protocol implementation, in Swift.
 
 ## current state
-Handles `build/initialize` request.
+Supports completion from default frameworks, but fails to get project contents.
+Handles following methods currently:
+
+- `build/initialize`
+- `build/shutdown`
+- `build/exit`
+- `textDocument/registerForChanges`
+- `workspace/buildTargets`
+- `buildTarget/sources`
+
+Missing:
+
+- `textDocument/sourceKitOptions`
 
 ## how to: install
 Right now there is zero automation provided by the tool, you have to configure it manually.
