@@ -1,9 +1,15 @@
 import Foundation
 
-struct Request<Params>: Decodable where Params: Decodable {
+struct Request<Params> where Params: Decodable & Sendable {
     let id: String
     let method: String
     let params: Params
+}
+
+extension Request: Decodable {
+}
+
+extension Request: Sendable {
 }
 
 extension Request: CustomStringConvertible {

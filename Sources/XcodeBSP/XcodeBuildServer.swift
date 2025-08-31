@@ -20,6 +20,7 @@ final class XcodeBuildServer: Sendable {
             BuildExit(),
             TextDocumentRegisterForChanges(),
             WorkspaceBuildTargets(logger: logger),
+            BuildTargetPrepare(logger: logger),
             BuildTargetSources(logger: logger),
         ])
     }
@@ -31,7 +32,8 @@ extension XcodeBuildServer {
             guard let self else {
                 return
             }
-
+    
+            logger.debug("new message for \(msg.method)")
             do {
                 try self.dispatch(message: msg, body: body)
             } catch {

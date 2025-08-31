@@ -1,7 +1,7 @@
 import Foundation
 
 protocol MethodHandler: Sendable {
-    associatedtype Params: Decodable
+    associatedtype Params: Decodable & Sendable
     associatedtype Result: Encodable
 
     var method: String { get }
