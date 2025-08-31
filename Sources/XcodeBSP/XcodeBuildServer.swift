@@ -51,22 +51,17 @@ extension XcodeBuildServer {
             return
         }
 
-        func _open(_ handler: some MethodHandler) throws {
-            let response = try handler.handle(data: body, decoder: decoder)
-            try send(response)
+        // hack to open existential and be able to call handle on it
+        func handle(with handler: some MethodHandler) throws -> some Encodable {
+            return try handler.handle(data: body, decoder: decoder)
         }
 
-        try _open(handler)
+        let response = try handle(with: handler)
+        try conn.send(message: response)
     }
 
     private struct UnhandledMethodError: Error {
         let method: String
         let data: Data
-    }
-
-    private func send(_ resp: some Encodable) throws {
-        let data = try encoder.encode(resp)
-        let header = "Content-Length: \(data.count)\r\n\r\n".data(using: .utf8)!
-        FileHandle.standardOutput.write(header + data)
     }
 }

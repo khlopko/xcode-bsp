@@ -67,6 +67,12 @@ extension JSONRPCConn {
             throw InvalidMessageError(reason: .failedToDecode(decodingError: error), data: data)
         }
     }
+
+    func send(message: some Encodable) throws {
+        let data = try encoder.encode(message)
+        let header = "Content-Length: \(data.count)\r\n\r\n".data(using: .utf8)!
+        FileHandle.standardOutput.write(header + data)
+    }
 }
 
 extension JSONRPCConn {
