@@ -1,6 +1,6 @@
 import Foundation
 
-struct ShellOutput: Codable {
+struct ShellOutput {
     let command: String
     let text: String?
     let exitCode: Int32
