@@ -1,7 +1,7 @@
 import Foundation
 import Logging
 
-final class JSONRPCConn: Sendable {
+final class JSONRPCConnection: Sendable {
     private let queue: DispatchQueue
     private let source: DispatchSourceRead
     private let stdin: FileHandle
@@ -23,13 +23,13 @@ final class JSONRPCConn: Sendable {
     }
 }
 
-extension JSONRPCConn {
+extension JSONRPCConnection {
     struct Message: Decodable {
         let method: String
     }
 }
 
-extension JSONRPCConn {
+extension JSONRPCConnection {
     func start(messageHandler: @escaping @Sendable (_ msg: Message, _ body: Data) -> Void) {
         source.setEventHandler { [weak self] in
             guard let self else {
@@ -75,7 +75,7 @@ extension JSONRPCConn {
     }
 }
 
-extension JSONRPCConn {
+extension JSONRPCConnection {
     private struct NothingToReadError: Error {
     }
 
@@ -85,20 +85,20 @@ extension JSONRPCConn {
     }
 }
 
-extension JSONRPCConn.InvalidMessageError {
+extension JSONRPCConnection.InvalidMessageError {
     enum Reason {
         case failedToSplit(separator: Data)
         case failedToDecode(decodingError: DecodingError)
     }
 }
 
-extension JSONRPCConn.InvalidMessageError: CustomStringConvertible {
+extension JSONRPCConnection.InvalidMessageError: CustomStringConvertible {
     var description: String {
         return "Invalid message (reason=\(reason)): \(String(data: data, encoding: .utf8) ?? "")"
     }
 }
 
-extension JSONRPCConn.InvalidMessageError.Reason: CustomStringConvertible {
+extension JSONRPCConnection.InvalidMessageError.Reason: CustomStringConvertible {
     var description: String {
         switch self {
         case let .failedToSplit(separator):

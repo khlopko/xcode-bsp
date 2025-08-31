@@ -36,7 +36,7 @@ struct HandlersRegistry: Sendable {
         self.handlersByMethod = handlersByMethod
     }
 
-    func handler(for message: JSONRPCConn.Message) -> (any MethodHandler)? {
+    func handler(for message: JSONRPCConnection.Message) -> (any MethodHandler)? {
         return handlersByMethod[message.method]
     }
 }

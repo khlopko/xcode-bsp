@@ -3,7 +3,7 @@ import Foundation
 import Logging
 
 final class XcodeBuildServer: Sendable {
-    private let conn: JSONRPCConn
+    private let conn: JSONRPCConnection
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
     private let logger: Logger
@@ -13,7 +13,7 @@ final class XcodeBuildServer: Sendable {
         decoder = JSONDecoder()
         encoder = JSONEncoder()
         logger = try makeLogger(label: "xcode-bsp")
-        conn = JSONRPCConn(logger: logger)
+        conn = JSONRPCConnection(logger: logger)
         registry = HandlersRegistry(handlers: [
             BuildInitialize(logger: logger),
             BuildShutdown(),
@@ -44,7 +44,7 @@ extension XcodeBuildServer {
         RunLoop.current.run()
     }
 
-    private func dispatch(message: JSONRPCConn.Message, body: Data) throws {
+    private func dispatch(message: JSONRPCConnection.Message, body: Data) throws {
         guard let handler = registry.handler(for: message) else {
             logger.error("unhandled method: \(message.method)")
             logger.debug("unhandled message: \(String(data: body, encoding: .utf8) ?? "")")
