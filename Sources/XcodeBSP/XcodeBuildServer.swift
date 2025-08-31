@@ -2,56 +2,35 @@ import CryptoKit
 import Foundation
 import Logging
 
-final class XcodeBuildServer {
-    private let queue: DispatchQueue
-    private let source: DispatchSourceRead
+final class XcodeBuildServer: Sendable {
+    private let conn: JSONRPCConn
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
     private let logger: Logger
 
     init() throws {
-        queue = DispatchQueue(label: "local.sourcekit.bsp")
-        source = DispatchSource.makeReadSource(fileDescriptor: STDIN_FILENO, queue: queue)
         decoder = JSONDecoder()
         encoder = JSONEncoder()
         logger = try makeLogger(label: "xcode-bsp")
+        conn = JSONRPCConn(logger: logger)
     }
 }
 
 extension XcodeBuildServer {
-    func run() throws {
-        source.setEventHandler { [weak self] in
-            self?.receiveMessage()
+    func run() {
+        conn.start { [weak self] msg, body in
+            guard let self else {
+                return
+            }
+
+            do {
+                try self.dispatch(message: msg, body: body)
+            } catch {
+                self.logger.error("\(error)") 
+            }
         }
-        source.resume()
 
         RunLoop.current.run()
-    }
-
-    private func receiveMessage() {
-        do {
-            let data = FileHandle.standardInput.availableData
-            guard data.isEmpty == false, let sep = "\r\n\r\n".data(using: .utf8) else {
-                return
-            }
-
-            let parts = data.split(separator: sep)
-            guard parts.count == 2 else {
-                logger.error("expected 2 parts of message, got \(parts.count)")
-                return
-            }
-
-            let baseReq = try decoder.decode(BaseRequest.self, from: parts[1])
-            try dispatch(baseReq: baseReq, contents: parts[1])
-        } catch {
-            logger.error("\(error)")
-        }
-    }
-}
-
-extension XcodeBuildServer {
-    struct BaseRequest: Decodable {
-        let method: String
     }
 }
 
@@ -95,14 +74,14 @@ extension XcodeBuildServer {
         let data: Data
     }
 
-    func dispatch(baseReq: BaseRequest, contents: Data) throws {
-        guard let route = routes[baseReq.method] else {
-            logger.error("unhandled method: \(baseReq.method)")
-            logger.debug("unhandled message: \(String(data: contents, encoding: .utf8) ?? "")")
+    func dispatch(message: JSONRPCConn.Message, body: Data) throws {
+        guard let route = routes[message.method] else {
+            logger.error("unhandled method: \(message.method)")
+            logger.debug("unhandled message: \(String(data: body, encoding: .utf8) ?? "")")
             return
         }
 
-        try route(contents)
+        try route(body)
     }
 
     struct InitializeParams: Decodable {
@@ -368,7 +347,6 @@ extension XcodeBuildServer {
     }
 
     private func buildShutdown(data: Data) throws {
-        source.suspend()
         let req = try decoder.decode(Request<EmptyParams>.self, from: data)
         let resp = Response(id: req.id, result: EmptyResult())
         try send(resp)
