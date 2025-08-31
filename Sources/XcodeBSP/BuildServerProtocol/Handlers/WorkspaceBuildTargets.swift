@@ -2,6 +2,7 @@ import Foundation
 import Logging
 
 struct WorkspaceBuildTargets {
+    let xcodebuild: XcodeBuild
     let logger: Logger
 }
 
@@ -15,17 +16,18 @@ extension WorkspaceBuildTargets: MethodHandler {
     func handle(request: Request<Params>, decoder: JSONDecoder) throws -> Result {
         var targets: [Result.Target] = []
 
-        let output = shell("xcodebuild -showBuildSettings -json")
-        if let outputData = output.text?.data(using: .utf8) {
-            let xcodeBuildSettings = try decoder.decode([XcodeBuildSettings].self, from: outputData)
+        let list = try xcodebuild.list()
+        for scheme in list.project.schemes {
             // just taking first target with action: "build"
-            if let buildableTarget = xcodeBuildSettings.first(where: { $0.action == "build" }) {
-                let target = Result.Target(
-                    id: TargetID(uri: "\(buildableTarget.buildSettings.PROJECT)://\(buildableTarget.target)"),
-                    displayName: buildableTarget.target
-                )
-                targets.append(target)
+            guard let settings = try xcodebuild.settingsForScheme(scheme).first(where: { $0.action == "build" }) else {
+                continue
             }
+
+            let target = Result.Target(
+                id: TargetID(uri: "xcode://\(list.project.name)?scheme=\(scheme)&target=\(settings.target)"),
+                displayName: settings.target
+            )
+            targets.append(target)
         }
 
         return Result(targets: targets)

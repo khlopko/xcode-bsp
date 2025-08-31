@@ -20,17 +20,14 @@ extension BuildTargetPrepare: MethodHandler {
                     continue
                 }
 
-                logger.debug("starting build for \(scheme)")
+                logger.trace("starting build for \(scheme)")
                 let command = "xcodebuild -scheme \(scheme)"
-                let output = shell(command)
-                guard output.exitCode == 0 else {
-                    logger.error(
-                        "command=\(command) failed with code=\(output.exitCode) and output=\(output.text ?? "")"
-                    )
-                    continue
+                do {
+                    try shell(command)
+                    logger.trace("command=\(command) succeeded")
+                } catch {
+                    logger.error("\(error)")
                 }
-
-                logger.debug("command=\(command) succeeded")
             }
         }
 

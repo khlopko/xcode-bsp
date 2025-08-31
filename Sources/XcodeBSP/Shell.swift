@@ -2,11 +2,32 @@ import Foundation
 
 struct ShellOutput {
     let command: String
-    let text: String?
+    let data: Data
     let exitCode: Int32
 }
 
-func shell(_ command: String) -> ShellOutput {
+extension ShellOutput {
+    var textOutput: String? {
+        return String(data: data, encoding: .utf8)
+    }
+}
+
+struct ShellExecutionError: Error {
+    let output: ShellOutput
+}
+
+extension ShellExecutionError: CustomStringConvertible {
+    var description: String {
+        var result = "invocation of command=\(output.command) failed with code=\(output.exitCode)"
+        if let textOutput = output.textOutput {
+            result += " and output=\(textOutput)"
+        }
+        return result
+    }
+}
+
+@discardableResult
+func shell(_ command: String) throws -> ShellOutput {
     let task = Process()
     let pipe = Pipe()
 
@@ -19,9 +40,13 @@ func shell(_ command: String) -> ShellOutput {
     task.launch()
 
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    let output = String(data: data, encoding: .utf8)
 
     task.waitUntilExit()
 
-    return ShellOutput(command: command, text: output, exitCode: task.terminationStatus)
+    let output = ShellOutput(command: command, data: data, exitCode: task.terminationStatus)
+    guard output.exitCode == 0 else {
+        throw ShellExecutionError(output: output)
+    }
+
+    return output
 }

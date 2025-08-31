@@ -1,8 +1,9 @@
-import Foundation
 import CryptoKit
+import Foundation
 import Logging
 
 struct BuildInitialize {
+    let xcodebuild: XcodeBuild
     let logger: Logger
 }
 
@@ -12,26 +13,51 @@ extension BuildInitialize: MethodHandler {
     }
 
     func handle(request: Request<Params>, decoder: JSONDecoder) throws -> Result {
-        var sourceKitData: Result.SourceKitData?
-        let output = shell("xcodebuild -showBuildSettings -json")
-        if let outputData = output.text?.data(using: .utf8) {
-            let xcodeBuildSettings = try decoder.decode([XcodeBuildSettings].self, from: outputData)
-            // just taking first target with action: "build"
-            if let buildableTarget = xcodeBuildSettings.first(where: { $0.action == "build" }) {
-                logger.debug("xcode build settings: \(buildableTarget)")
-                let indexStorePath = buildableTarget.buildSettings.BUILD_ROOT
-                let cachePath = "~/Library/Caches/xcode-bsp"
-                var sha256 = SHA256()
-                sha256.update(data: indexStorePath.data(using: .utf8)!)
-                let digest = sha256.finalize().split(separator: Character(":").asciiValue!)[1]
-                sourceKitData = Result.SourceKitData(
-                    indexDatabasePath: cachePath + "/indexDatabase-\(digest)",
-                    indexStorePath: indexStorePath
-                )
+        var settings: XcodeBuild.Settings?
+        let list = try xcodebuild.list()
+        for scheme in list.project.schemes {
+            do {
+                // just taking first target with action: "build"
+                settings = try xcodebuild.settingsForScheme(scheme).first { $0.action == "build" }
+                if settings != nil {
+                    break
+                }
+            } catch {
+                logger.error("failed to get settings for \(scheme): \(error)")
+                continue
             }
         }
 
+        var sourceKitData: Result.SourceKitData?
+        if let settings {
+            let indexStorePath = URL(string: settings.buildSettings.BUILD_ROOT)?
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appending(components: "Index.noindex", "DataStore")
+                .path()
+            let cachePath = FileManager.default.homeDirectoryForCurrentUser
+                .appending(components: "Library", "Caches", "xcode-bsp")
+            sourceKitData = Result.SourceKitData(
+                indexDatabasePath: indexStorePath.map { 
+                    return cachePath.appending(component: "indexDatabase-\($0.sha256() ?? "")").path() 
+                },
+                indexStorePath: indexStorePath
+            )
+        }
+
         return Result(capabilities: Result.Capabilities(), data: sourceKitData)
+    }
+}
+
+extension String {
+    func sha256() -> String? {
+        guard let data = data(using: .utf8) else {
+            return nil
+        }
+
+        let digest = SHA256.hash(data: data)
+        let hashString = digest.compactMap { String(format: "%02x", $0) }.joined()
+        return hashString
     }
 }
 
@@ -59,8 +85,9 @@ extension BuildInitialize.Result {
 
 extension BuildInitialize.Result {
     struct SourceKitData: Encodable {
-        let indexDatabasePath: String
-        let indexStorePath: String
+        let indexDatabasePath: String?
+        let indexStorePath: String?
+        let prepareProvider: Bool = false
         let sourceKitOptionsProvider: Bool = true
     }
 }

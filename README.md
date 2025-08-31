@@ -1,5 +1,5 @@
-> [!Caution]
-> Under development, may contain issues and _do_ contain missing functionality.
+> [!Important]
+> State-of-the-art implementation, may contain issues or don't work on particular projects.
 
 # xcode-bsp
 Xcode Build Server Protocol implementation in Swift. 
@@ -7,20 +7,17 @@ Xcode Build Server Protocol implementation in Swift.
 Aims to provide support for Xcode projects in other editors that rely on [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp). 
 
 ## current state
-Supports completion from default frameworks, but fails to get project contents.
-Handles following methods currently:
+Capable to run completion requests. Missing diagnostics. Really slow on start.
 
+Implemented methods:
 - `build/initialize`
 - `build/shutdown`
 - `build/exit`
 - `textDocument/registerForChanges`
 - `workspace/buildTargets`
 - `buildTarget/sources`
-- `buildTarget/prepare` (not sure about this one, haven't managed to receive a message to test)
-
-Missing:
-
-- `textDocument/sourceKitOptions` (that one is actually the most important)
+- `buildTarget/prepare` (currently disabled)
+- `textDocument/sourceKitOptions`
 
 ## how to: install
 Right now there is zero automation provided by the tool, you have to configure it manually.

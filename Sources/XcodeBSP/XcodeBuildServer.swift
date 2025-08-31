@@ -14,14 +14,16 @@ final class XcodeBuildServer: Sendable {
         encoder = JSONEncoder()
         logger = try makeLogger(label: "xcode-bsp")
         conn = JSONRPCConnection(logger: logger)
+        let xcodebuild = XcodeBuild(decoder: decoder, logger: logger)
         registry = HandlersRegistry(handlers: [
-            BuildInitialize(logger: logger),
+            BuildInitialize(xcodebuild: xcodebuild, logger: logger),
             BuildShutdown(),
             BuildExit(),
             TextDocumentRegisterForChanges(),
-            WorkspaceBuildTargets(logger: logger),
+            WorkspaceBuildTargets(xcodebuild: xcodebuild, logger: logger),
             BuildTargetPrepare(logger: logger),
-            BuildTargetSources(logger: logger),
+            BuildTargetSources(xcodebuild: xcodebuild, logger: logger),
+            TextDocumentSourceKitOptions(xcodebuild: xcodebuild, logger: logger),
         ])
     }
 }
