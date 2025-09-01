@@ -79,6 +79,7 @@ private struct FileLogHandler: LogHandler {
         do {
             let data = try encoder.encode(msg)
             fileHandle.write(data + "\r\n".data(using: .utf8)!)
+            try fileHandle.synchronize()
         } catch {
             // we lost log
         }
