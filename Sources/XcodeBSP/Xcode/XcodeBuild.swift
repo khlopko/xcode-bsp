@@ -22,11 +22,19 @@ extension XcodeBuild.List {
 }
 
 extension XcodeBuild {
-    func list() throws -> List {
-        let output = try shell("xcodebuild -json -list")
-        let list = try decoder.decode(List.self, from: output.data)
-        logger.trace("\(output.command): \(list)")
+    func list(checkCache: Bool = true) throws -> List {
+        let data = try exec(command: "-list", cacheURL: listCacheURL(), checkCache: checkCache)
+        let list = try decoder.decode(List.self, from: data)
         return list
+    }
+
+    private func listCacheURL() -> URL {
+        // this will overwrite setting for multiple projects, need to revisit it soon
+        let url = cacheDir.appending(component: "list.json")
+        if FileManager.default.fileExists(atPath: url.path()) == false {
+            FileManager.default.createFile(atPath: url.path(), contents: nil)
+        }
+        return url
     }
 }
 
@@ -49,11 +57,22 @@ extension XcodeBuild.Settings {
 }
 
 extension XcodeBuild {
-    func settingsForScheme(_ scheme: String) throws -> [Settings] {
-        let output = try shell("xcodebuild -json -showBuildSettings -scheme \(scheme) 2>/dev/null")
-        let settings = try decoder.decode([Settings].self, from: output.data)
-        logger.trace("\(output.command): \(settings)")
+    func settingsForScheme(_ scheme: String, checkCache: Bool = true) throws -> [Settings] {
+        let data = try exec(
+            command: "-showBuildSettings -scheme \(scheme) 2>/dev/null",
+            cacheURL: settingsCacheURL(forScheme: scheme),
+            checkCache: checkCache
+        )
+        let settings = try decoder.decode([Settings].self, from: data)
         return settings
+    }
+    
+    private func settingsCacheURL(forScheme scheme: String) -> URL {
+        let url = cacheDir.appending(component: "\(scheme)-settings.json")
+        if FileManager.default.fileExists(atPath: url.path()) == false {
+            FileManager.default.createFile(atPath: url.path(), contents: nil)
+        }
+        return url
     }
 }
 
@@ -66,22 +85,45 @@ extension XcodeBuild {
 }
 
 extension XcodeBuild {
-    func settingsForIndexCacheURL(forScheme scheme: String) -> URL {
+    func settingsForIndex(forScheme scheme: String, checkCache: Bool = true) throws -> SettingsForIndex {
+        let data = try exec(
+            command: "-showBuildSettingsForIndex -scheme \(scheme) 2>/dev/null",
+            cacheURL: settingsForIndexCacheURL(forScheme: scheme),
+            checkCache: checkCache
+        )
+        let settings = try decoder.decode(SettingsForIndex.self, from: data)
+        return settings
+    }
+
+    private func settingsForIndexCacheURL(forScheme scheme: String) -> URL {
         let url = cacheDir.appending(component: "\(scheme)-settingsForIndex.json")
         if FileManager.default.fileExists(atPath: url.path()) == false {
             FileManager.default.createFile(atPath: url.path(), contents: nil)
         }
         return url
     }
-
-    func settingsForIndex(forScheme scheme: String) throws -> SettingsForIndex {
-        let output = try shell(
-            "xcodebuild -json -showBuildSettingsForIndex -scheme \(scheme) 2>/dev/null",
-            output: settingsForIndexCacheURL(forScheme: scheme)
-        )
-        let settings = try decoder.decode(SettingsForIndex.self, from: output.data)
-        logger.trace("\(output.command): \(settings)")
-        return settings
-    }
 }
 
+extension XcodeBuild {
+    private struct NoCacheError: Error {
+    }
+
+    private func exec(command: String, cacheURL: URL, checkCache: Bool) throws -> Data {
+        do {
+            guard checkCache else {
+                throw NoCacheError()
+            }
+
+            let handle = try FileHandle(forReadingFrom: cacheURL)
+            guard let cachedData = try handle.readToEnd() else {
+                throw NoCacheError()
+            }
+
+            return cachedData
+        }
+        catch {
+            let output = try shell("xcodebuild -json \(command)", output: cacheURL)
+            return output.data
+        }
+    }
+}
