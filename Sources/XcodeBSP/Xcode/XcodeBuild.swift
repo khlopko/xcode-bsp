@@ -2,6 +2,7 @@ import Foundation
 import Logging
 
 struct XcodeBuild {
+    let cacheDir: URL
     let decoder: JSONDecoder
     let logger: Logger
 }
@@ -65,8 +66,19 @@ extension XcodeBuild {
 }
 
 extension XcodeBuild {
+    func settingsForIndexCacheURL(forScheme scheme: String) -> URL {
+        let url = cacheDir.appending(component: "\(scheme)-settingsForIndex.json")
+        if FileManager.default.fileExists(atPath: url.path()) == false {
+            FileManager.default.createFile(atPath: url.path(), contents: nil)
+        }
+        return url
+    }
+
     func settingsForIndex(forScheme scheme: String) throws -> SettingsForIndex {
-        let output = try shell("xcodebuild -json -showBuildSettingsForIndex -scheme \(scheme) 2>/dev/null")
+        let output = try shell(
+            "xcodebuild -json -showBuildSettingsForIndex -scheme \(scheme) 2>/dev/null",
+            output: settingsForIndexCacheURL(forScheme: scheme)
+        )
         let settings = try decoder.decode(SettingsForIndex.self, from: output.data)
         logger.trace("\(output.command): \(settings)")
         return settings

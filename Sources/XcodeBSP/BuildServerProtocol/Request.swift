@@ -1,5 +1,3 @@
-import Foundation
-
 struct Request<Params> where Params: Decodable & Sendable {
     let id: String
     let method: String

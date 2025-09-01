@@ -10,6 +10,8 @@ final class JSONRPCConnection: Sendable {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
+    private let separator: Data
+
     private let logger: Logger
 
     init(logger: Logger) {
@@ -20,6 +22,7 @@ final class JSONRPCConnection: Sendable {
         source = DispatchSource.makeReadSource(fileDescriptor: stdin.fileDescriptor, queue: queue)
         decoder = JSONDecoder()
         encoder = JSONEncoder()
+        separator = "\r\n\r\n".data(using: .utf8)!
     }
 }
 
@@ -49,14 +52,14 @@ extension JSONRPCConnection {
     }
 
     private func receiveMessage() throws -> (message: Message, body: Data) {
-        let data = FileHandle.standardInput.availableData
-        guard data.isEmpty == false, let sep = "\r\n\r\n".data(using: .utf8) else {
+        let data = stdin.availableData
+        guard data.isEmpty == false else {
             throw NothingToReadError()
         }
 
-        let parts = data.split(separator: sep)
+        let parts = data.split(separator: separator)
         guard parts.count == 2 else {
-            throw InvalidMessageError(reason: .failedToSplit(separator: sep), data: data)
+            throw InvalidMessageError(reason: .failedToSplit(separator: separator), data: data)
         }
 
         let body = parts[1]
@@ -70,8 +73,8 @@ extension JSONRPCConnection {
 
     func send(message: some Encodable) throws {
         let data = try encoder.encode(message)
-        let header = "Content-Length: \(data.count)\r\n\r\n".data(using: .utf8)!
-        FileHandle.standardOutput.write(header + data)
+        let header = "Content-Length: \(data.count)".data(using: .utf8)!
+        stdout.write(header + separator + data)
     }
 }
 

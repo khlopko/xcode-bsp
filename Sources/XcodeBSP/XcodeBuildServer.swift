@@ -14,9 +14,11 @@ final class XcodeBuildServer: Sendable {
         encoder = JSONEncoder()
         logger = try makeLogger(label: "xcode-bsp")
         conn = JSONRPCConnection(logger: logger)
-        let xcodebuild = XcodeBuild(decoder: decoder, logger: logger)
+        let cacheDir = FileManager.default.homeDirectoryForCurrentUser
+            .appending(components: "Library", "Caches", "xcode-bsp")
+        let xcodebuild = XcodeBuild(cacheDir: cacheDir, decoder: decoder, logger: logger)
         registry = HandlersRegistry(handlers: [
-            BuildInitialize(xcodebuild: xcodebuild, logger: logger),
+            BuildInitialize(xcodebuild: xcodebuild, cacheDir: cacheDir, logger: logger),
             BuildShutdown(),
             BuildExit(),
             TextDocumentRegisterForChanges(),
@@ -35,9 +37,13 @@ extension XcodeBuildServer {
                 return
             }
     
-            logger.debug("new message for \(msg.method)")
+            self.logger.debug("new message for \(msg.method)")
             do {
                 try self.dispatch(message: msg, body: body)
+                self.logger.debug("response for \(msg.method) sent")
+            } catch let error as UnhandledMethodError { 
+                self.logger.error("unhandled method: \(error.method)")
+                self.logger.debug("unhandled message: \(String(data: error.data, encoding: .utf8) ?? "")")
             } catch {
                 self.logger.error("\(error)") 
             }
@@ -48,9 +54,7 @@ extension XcodeBuildServer {
 
     private func dispatch(message: JSONRPCConnection.Message, body: Data) throws {
         guard let handler = registry.handler(for: message) else {
-            logger.error("unhandled method: \(message.method)")
-            logger.debug("unhandled message: \(String(data: body, encoding: .utf8) ?? "")")
-            return
+            throw UnhandledMethodError(method: message.method, data: body)
         }
 
         // hack to open existential and be able to call handle on it

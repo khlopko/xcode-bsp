@@ -27,11 +27,11 @@ extension ShellExecutionError: CustomStringConvertible {
 }
 
 @discardableResult
-func shell(_ command: String) throws -> ShellOutput {
+func shell(_ command: String, output: URL? = nil) throws -> ShellOutput {
     let task = Process()
     let pipe = Pipe()
 
-    task.standardOutput = pipe
+    task.standardOutput = try output.map { try FileHandle(forWritingTo: $0) } ?? pipe
     task.standardError = pipe
     task.arguments = ["-c", command]
     task.launchPath = "/bin/sh"
@@ -39,9 +39,15 @@ func shell(_ command: String) throws -> ShellOutput {
 
     task.launch()
 
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-
     task.waitUntilExit()
+ 
+    let data: Data
+    if let output {
+        data = try FileHandle(forReadingFrom: output).readDataToEndOfFile()
+    }
+    else {
+        data = pipe.fileHandleForReading.readDataToEndOfFile()
+    }
 
     let output = ShellOutput(command: command, data: data, exitCode: task.terminationStatus)
     guard output.exitCode == 0 else {

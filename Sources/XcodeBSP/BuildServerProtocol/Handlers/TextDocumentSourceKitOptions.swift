@@ -17,25 +17,36 @@ extension TextDocumentSourceKitOptions: MethodHandler {
         let components = URLComponents(string: request.params.target.uri)
         if let scheme = components?.queryItems?.first(where: { $0.name == "scheme" })?.value {
             let settings = try xcodebuild.settingsForScheme(scheme).first { $0.action == "build" }
-            let settingsForIndex = try xcodebuild.settingsForIndex(forScheme: scheme)
+
+            let settingsForIndex: XcodeBuild.SettingsForIndex
+            if 
+                let cacheFile = try? FileHandle(forReadingFrom: xcodebuild.settingsForIndexCacheURL(forScheme: scheme)),
+                let cachedData = try cacheFile.readToEnd(),
+                let cachedSettingsForIndex = try? decoder.decode(XcodeBuild.SettingsForIndex.self, from: cachedData)
+            {
+                settingsForIndex = cachedSettingsForIndex
+            } else {
+                settingsForIndex = try xcodebuild.settingsForIndex(forScheme: scheme)
+            }
+
             if let filePath = URLComponents(string: request.params.textDocument.uri)?.path {
-                var arguments = settingsForIndex[scheme]?[filePath]?.swiftASTCommandArguments.filter {
-                    $0 != "-use-frontend-parseable-output"
-                } ?? []
+                var arguments =
+                    settingsForIndex[scheme]?[filePath]?.swiftASTCommandArguments.filter {
+                        $0 != "-use-frontend-parseable-output"
+                    } ?? []
                 for (i, arg) in arguments.enumerated().reversed() {
                     if arg == "-emit-localized-strings-path" {
                         arguments.remove(at: i)
                         arguments.remove(at: i - 1)
-                    }   
+                    }
                     if arg == "-emit-localized-strings" {
                         arguments.remove(at: i)
                     }
                 }
                 result = Result(
-                    compilerArguments: arguments ?? [],
+                    compilerArguments: arguments,
                     workingDirectory: settings?.buildSettings.SOURCE_ROOT
                 )
-                logger.debug("sourceKitOptions: \(result)")
             } else {
                 result = Result(compilerArguments: [], workingDirectory: nil)
             }

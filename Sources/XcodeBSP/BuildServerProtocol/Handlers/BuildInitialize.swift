@@ -4,6 +4,7 @@ import Logging
 
 struct BuildInitialize {
     let xcodebuild: XcodeBuild
+    let cacheDir: URL
     let logger: Logger
 }
 
@@ -35,12 +36,11 @@ extension BuildInitialize: MethodHandler {
                 .deletingLastPathComponent()
                 .appending(components: "Index.noindex", "DataStore")
                 .path()
-            let cachePath = FileManager.default.homeDirectoryForCurrentUser
-                .appending(components: "Library", "Caches", "xcode-bsp")
+            let indexDatabasePath = indexStorePath.map { 
+                return cacheDir.appending(component: "indexDatabase-\($0.sha256() ?? "")").path() 
+            }
             sourceKitData = Result.SourceKitData(
-                indexDatabasePath: indexStorePath.map { 
-                    return cachePath.appending(component: "indexDatabase-\($0.sha256() ?? "")").path() 
-                },
+                indexDatabasePath: indexDatabasePath,
                 indexStorePath: indexStorePath
             )
         }

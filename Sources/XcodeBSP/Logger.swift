@@ -12,6 +12,7 @@ private struct FileLogHandler: LogHandler {
     var metadata: Logger.Metadata = [:]
     var metadataProvider: Logger.MetadataProvider?
     var logLevel: Logger.Level = .debug
+    private let encoder: JSONEncoder
     private let fileHandle: FileHandle
 
     enum InitializationError: Error {
@@ -22,7 +23,8 @@ private struct FileLogHandler: LogHandler {
     init() throws {
         let tmpDirPath = "/tmp/xcode-bsp"
         if FileManager.default.fileExists(atPath: tmpDirPath) == false {
-            try FileManager.default.createDirectory(atPath: tmpDirPath, withIntermediateDirectories: false)
+            try FileManager.default.createDirectory(
+                atPath: tmpDirPath, withIntermediateDirectories: false)
         }
         let logPath = tmpDirPath + "/default.log"
         if FileManager.default.fileExists(atPath: logPath) == false {
@@ -33,12 +35,14 @@ private struct FileLogHandler: LogHandler {
             throw InitializationError.noFileHandle
         }
 
-        self.fileHandle = fileHandle
         do {
             try fileHandle.seekToEnd()
         } catch {
             throw InitializationError.failedSeekToEnd(error)
         }
+
+        self.fileHandle = fileHandle
+        encoder = JSONEncoder()
     }
 
     subscript(metadataKey key: String) -> Logger.Metadata.Value? {
@@ -50,6 +54,13 @@ private struct FileLogHandler: LogHandler {
         }
     }
 
+    private struct LogMsg: Encodable {
+        let at: String
+        let level: Logger.Level
+        let origin: String
+        let message: String
+    }
+
     func log(
         level: Logger.Level,
         message: Logger.Message,
@@ -59,8 +70,17 @@ private struct FileLogHandler: LogHandler {
         function: String,
         line: UInt
     ) {
-        fileHandle.write(
-            "{\"at\":\"\(Date().ISO8601Format())\",\"level\":\"\(level)\",\"message\":\"\(message)\"}\n"
-                .data(using: .utf8)!)
+        let msg = LogMsg(
+            at: Date().ISO8601Format(),
+            level: level,
+            origin: "\(file.split(separator: ".").first.map { String($0) } ?? file).\(function):\(line)",
+            message: "\(message)"
+        )
+        do {
+            let data = try encoder.encode(msg)
+            fileHandle.write(data + "\r\n".data(using: .utf8)!)
+        } catch {
+            // we lost log
+        }
     }
 }

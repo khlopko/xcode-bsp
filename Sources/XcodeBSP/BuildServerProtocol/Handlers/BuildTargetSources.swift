@@ -40,7 +40,6 @@ extension BuildTargetSources: MethodHandler {
             items.append(item)
         }
 
-        logger.debug("sources: \(items)")
         return Result(items: items)
     }
 }
