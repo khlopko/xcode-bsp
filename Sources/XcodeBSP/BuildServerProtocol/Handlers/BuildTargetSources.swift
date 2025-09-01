@@ -23,7 +23,7 @@ extension BuildTargetSources: MethodHandler {
                 continue
             }
 
-            guard let settings = try xcodebuild.settingsForScheme(scheme).first(where: { $0.action == "build" }) else {
+            guard let settings = try? xcodebuild.settingsForScheme(scheme).first(where: { $0.action == "build" }) else {
                 continue
             }
 

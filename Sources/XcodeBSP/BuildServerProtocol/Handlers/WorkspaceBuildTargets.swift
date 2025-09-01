@@ -19,7 +19,7 @@ extension WorkspaceBuildTargets: MethodHandler {
         let list = try xcodebuild.list()
         for scheme in list.project.schemes {
             // just taking first target with action: "build"
-            guard let settings = try xcodebuild.settingsForScheme(scheme).first(where: { $0.action == "build" }) else {
+            guard let settings = try? xcodebuild.settingsForScheme(scheme).first(where: { $0.action == "build" }) else {
                 continue
             }
 
