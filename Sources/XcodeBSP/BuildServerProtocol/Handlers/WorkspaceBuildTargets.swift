@@ -17,7 +17,8 @@ extension WorkspaceBuildTargets: MethodHandler {
         var targets: [Result.Target] = []
 
         let list = try xcodebuild.list()
-        for scheme in list.project.schemes {
+        let config = try decoder.decode(Config.self, from: Data(contentsOf: Config.configURL()))
+        for scheme in config.activeSchemes {
             // just taking first target with action: "build"
             guard let settings = try? xcodebuild.settingsForScheme(scheme).first(where: { $0.action == "build" }) else {
                 continue

@@ -14,9 +14,10 @@ extension BuildInitialize: MethodHandler {
     }
 
     func handle(request: Request<Params>, decoder: JSONDecoder) throws -> Result {
+        let config = try decoder.decode(Config.self, from: Data(contentsOf: Config.configURL()))
+
         var settings: XcodeBuild.Settings?
-        let list = try xcodebuild.list()
-        for scheme in list.project.schemes {
+        for scheme in config.activeSchemes {
             do {
                 // just taking first target with action: "build"
                 settings = try xcodebuild.settingsForScheme(scheme).first { $0.action == "build" }

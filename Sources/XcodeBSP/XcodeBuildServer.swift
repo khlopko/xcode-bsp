@@ -9,13 +9,11 @@ final class XcodeBuildServer: Sendable {
     private let logger: Logger
     private let registry: HandlersRegistry
 
-    init() throws {
+    init(cacheDir: URL) throws {
         decoder = JSONDecoder()
         encoder = JSONEncoder()
         logger = try makeLogger(label: "xcode-bsp")
         conn = JSONRPCConnection(logger: logger)
-        let cacheDir = FileManager.default.homeDirectoryForCurrentUser
-            .appending(components: "Library", "Caches", "xcode-bsp")
         let xcodebuild = XcodeBuild(cacheDir: cacheDir, decoder: decoder, logger: logger)
         registry = HandlersRegistry(handlers: [
             BuildInitialize(xcodebuild: xcodebuild, cacheDir: cacheDir, logger: logger),
