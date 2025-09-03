@@ -80,7 +80,9 @@ extension XcodeBuild {
     typealias SettingsForIndex = [String: [String: FileSettings]]
 
     struct FileSettings: Decodable {
-        let swiftASTCommandArguments: [String]
+        let swiftASTCommandArguments: [String]?
+        let clangASTCommandArguments: [String]?
+        let clangPCHCommandArguments: [String]?
     }
 }
 

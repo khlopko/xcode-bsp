@@ -24,10 +24,11 @@ extension TextDocumentSourceKitOptions: MethodHandler {
                 let settingsForIndex,
                 let filePath = URLComponents(string: request.params.textDocument.uri)?.path 
             {
-                var arguments =
-                    settingsForIndex[scheme]?[filePath]?.swiftASTCommandArguments.filter {
-                        $0 != "-use-frontend-parseable-output"
-                    } ?? []
+                let settingsFoFile = settingsForIndex[scheme]?[filePath]
+                var arguments = settingsFoFile?.swiftASTCommandArguments ?? []
+                arguments.append(contentsOf: settingsFoFile?.clangASTCommandArguments ?? [])
+                arguments.append(contentsOf: settingsFoFile?.clangPCHCommandArguments ?? [])
+                arguments = arguments.filter { $0 != "-use-frontend-parseable-output" }
                 for (i, arg) in arguments.enumerated().reversed() {
                     if arg == "-emit-localized-strings-path" {
                         arguments.remove(at: i)
