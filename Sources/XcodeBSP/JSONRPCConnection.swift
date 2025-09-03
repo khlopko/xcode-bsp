@@ -33,7 +33,7 @@ extension JSONRPCConnection {
 }
 
 extension JSONRPCConnection {
-    func start(messageHandler: @escaping @Sendable (_ msg: Message, _ body: Data) -> Void) {
+    func start(messageHandler: @escaping @Sendable (_ msg: Message, _ body: Data) async -> Void) {
         source.setEventHandler { [weak self] in
             guard let self else {
                 return
@@ -41,7 +41,9 @@ extension JSONRPCConnection {
 
             do {
                 let (msg, body) = try self.receiveMessage()
-                messageHandler(msg, body)
+                Task<Void, Never> {
+                    await messageHandler(msg, body)
+                }
             } catch is NothingToReadError {
                 // skip
             } catch {

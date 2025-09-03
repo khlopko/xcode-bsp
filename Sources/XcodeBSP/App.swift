@@ -46,7 +46,7 @@ struct XcodeBSPApp: ParsableCommand {
                     throw error
                 }
             }
-            
+
             let configPath = Config.configURL().path()
             if FileManager.default.fileExists(atPath: configPath) {
                 try FileManager.default.removeItem(atPath: configPath)

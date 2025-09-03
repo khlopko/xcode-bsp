@@ -6,13 +6,13 @@ protocol MethodHandler: Sendable {
 
     var method: String { get }
 
-    func handle(request: Request<Params>, decoder: JSONDecoder) throws -> Result
+    func handle(request: Request<Params>, decoder: JSONDecoder) async throws -> Result
 }
 
 extension MethodHandler {
-    func handle(data: Data, decoder: JSONDecoder) throws -> Response<Result> {
+    func handle(data: Data, decoder: JSONDecoder) async throws -> Response<Result> {
         let request = try decoder.decode(Request<Params>.self, from: data)
-        let result = try handle(request: request, decoder: decoder)
+        let result = try await handle(request: request, decoder: decoder)
         let response = Response(id: request.id, result: result)
         return response
     }

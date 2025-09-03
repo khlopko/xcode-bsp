@@ -15,6 +15,7 @@ final class XcodeBuildServer: Sendable {
         logger = try makeLogger(label: "xcode-bsp")
         conn = JSONRPCConnection(logger: logger)
         let xcodebuild = XcodeBuild(cacheDir: cacheDir, decoder: decoder, logger: logger)
+        let db = try Database(cacheDir: cacheDir)
         registry = HandlersRegistry(handlers: [
             BuildInitialize(xcodebuild: xcodebuild, cacheDir: cacheDir, logger: logger),
             BuildShutdown(),
@@ -23,7 +24,7 @@ final class XcodeBuildServer: Sendable {
             WorkspaceBuildTargets(xcodebuild: xcodebuild, logger: logger),
             BuildTargetPrepare(logger: logger),
             BuildTargetSources(xcodebuild: xcodebuild, logger: logger),
-            TextDocumentSourceKitOptions(xcodebuild: xcodebuild, logger: logger),
+            TextDocumentSourceKitOptions(xcodebuild: xcodebuild, db: db, logger: logger),
         ])
     }
 }
@@ -37,7 +38,7 @@ extension XcodeBuildServer {
     
             self.logger.debug("new message for \(msg.method)")
             do {
-                try self.dispatch(message: msg, body: body)
+                try await self.dispatch(message: msg, body: body)
                 self.logger.debug("response for \(msg.method) sent")
             } catch let error as UnhandledMethodError { 
                 self.logger.error("unhandled method: \(error.method)")
@@ -50,17 +51,17 @@ extension XcodeBuildServer {
         RunLoop.current.run()
     }
 
-    private func dispatch(message: JSONRPCConnection.Message, body: Data) throws {
+    private func dispatch(message: JSONRPCConnection.Message, body: Data) async throws {
         guard let handler = registry.handler(for: message) else {
             throw UnhandledMethodError(method: message.method, data: body)
         }
 
         // hack to open existential and be able to call handle on it
-        func handle(with handler: some MethodHandler) throws -> some Encodable {
-            return try handler.handle(data: body, decoder: decoder)
+        func handle(with handler: some MethodHandler) async throws -> some Encodable {
+            return try await handler.handle(data: body, decoder: decoder)
         }
 
-        let response = try handle(with: handler)
+        let response = try await handle(with: handler)
         try conn.send(message: response)
     }
 
