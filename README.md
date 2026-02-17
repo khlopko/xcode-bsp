@@ -43,14 +43,17 @@ Right now there is zero automation provided by the tool, you have to configure i
      "name": "xcode-bsp",
      "argv": ["/usr/local/bin/xcode-bsp"],
      "version": "0.1.0",
-     "bspVersion": "2.0.0",
-     "languages": ["swift", "objective-c", "objective-cpp", "c", "cpp"]
+      "bspVersion": "2.0.0",
+      "languages": ["swift", "objective-c", "objective-cpp", "c", "cpp"],
+      "activeSchemes": []
    }
    ```
+
+   `activeSchemes` is optional. If omitted or empty, `xcode-bsp` will use all schemes from
+   `xcodebuild -list`.
 
 Rest is up to [SourceKit's LSP](https://github.com/swiftlang/sourcekit-lsp/blob/ef1178867e7df7d3033d6ec764592fb71846cb67/Contributor%20Documentation/BSP%20Extensions.md).
 
 ## alternatives
 
 - [SolaWing/xcode-build-server](https://github.com/SolaWing/xcode-build-server)
-

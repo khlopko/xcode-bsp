@@ -1,11 +1,6 @@
-import CryptoKit
 import Foundation
-import Logging
 
 struct BuildInitialize {
-    let xcodebuild: XcodeBuild
-    let cacheDir: URL
-    let logger: Logger
 }
 
 extension BuildInitialize: MethodHandler {
@@ -14,51 +9,11 @@ extension BuildInitialize: MethodHandler {
     }
 
     func handle(request: Request<Params>, decoder: JSONDecoder) throws -> Result {
-        let config = try decoder.decode(Config.self, from: Data(contentsOf: Config.configURL()))
+        _ = try decoder.decode(Config.self, from: Data(contentsOf: Config.configURL()))
 
-        var settings: XcodeBuild.Settings?
-        for scheme in config.activeSchemes {
-            do {
-                // just taking first target with action: "build"
-                settings = try xcodebuild.settingsForScheme(scheme).first { $0.action == "build" }
-                if settings != nil {
-                    break
-                }
-            } catch {
-                logger.error("failed to get settings for \(scheme): \(error)")
-                continue
-            }
-        }
-
-        var sourceKitData: Result.SourceKitData?
-        if let settings {
-            let indexStorePath = URL(string: settings.buildSettings.BUILD_ROOT)?
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appending(components: "Index.noindex", "DataStore")
-                .path()
-            let indexDatabasePath = indexStorePath.map { 
-                return cacheDir.appending(component: "indexDatabase-\($0.sha256() ?? "")").path() 
-            }
-            sourceKitData = Result.SourceKitData(
-                indexDatabasePath: indexDatabasePath,
-                indexStorePath: indexStorePath
-            )
-        }
+        let sourceKitData = Result.SourceKitData(indexDatabasePath: nil, indexStorePath: nil)
 
         return Result(capabilities: Result.Capabilities(), data: sourceKitData)
-    }
-}
-
-extension String {
-    func sha256() -> String? {
-        guard let data = data(using: .utf8) else {
-            return nil
-        }
-
-        let digest = SHA256.hash(data: data)
-        let hashString = digest.compactMap { String(format: "%02x", $0) }.joined()
-        return hashString
     }
 }
 
@@ -88,7 +43,7 @@ extension BuildInitialize.Result {
     struct SourceKitData: Encodable {
         let indexDatabasePath: String?
         let indexStorePath: String?
-        let prepareProvider: Bool = false
+        let prepareProvider: Bool = true
         let sourceKitOptionsProvider: Bool = true
     }
 }

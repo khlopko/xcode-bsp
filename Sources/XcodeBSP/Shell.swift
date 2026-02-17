@@ -30,8 +30,23 @@ extension ShellExecutionError: CustomStringConvertible {
 func shell(_ command: String, output: URL? = nil) throws -> ShellOutput {
     let task = Process()
     let pipe = Pipe()
+    let outputHandle: FileHandle?
 
-    task.standardOutput = try output.map { try FileHandle(forWritingTo: $0) } ?? pipe
+    if let output {
+        if FileManager.default.fileExists(atPath: output.path()) == false {
+            FileManager.default.createFile(atPath: output.path(), contents: nil)
+        }
+
+        let handle = try FileHandle(forUpdating: output)
+        try handle.truncate(atOffset: 0)
+        try handle.seek(toOffset: 0)
+        outputHandle = handle
+        task.standardOutput = handle
+    } else {
+        outputHandle = nil
+        task.standardOutput = pipe
+    }
+
     task.standardError = pipe
     task.arguments = ["-c", command]
     task.launchPath = "/bin/sh"
@@ -48,6 +63,8 @@ func shell(_ command: String, output: URL? = nil) throws -> ShellOutput {
     else {
         data = pipe.fileHandleForReading.readDataToEndOfFile()
     }
+
+    try? outputHandle?.close()
 
     let output = ShellOutput(command: command, data: data, exitCode: task.terminationStatus)
     guard output.exitCode == 0 else {

@@ -1,10 +1,32 @@
+import CryptoKit
 import Foundation
 import Logging
 
-struct XcodeBuild {
+final class XcodeBuild: @unchecked Sendable {
     let cacheDir: URL
     let decoder: JSONDecoder
     let logger: Logger
+
+    private let lock: NSLock
+    private let workspaceCachePrefix: String
+
+    private var listMemoryCache: Data?
+    private var settingsMemoryCache: [String: Data]
+    private var settingsForIndexMemoryCache: [String: Data]
+
+    init(cacheDir: URL, decoder: JSONDecoder, logger: Logger) {
+        self.cacheDir = cacheDir
+        self.decoder = decoder
+        self.logger = logger
+
+        lock = NSLock()
+        settingsMemoryCache = [:]
+        settingsForIndexMemoryCache = [:]
+
+        let workspacePath = FileManager.default.currentDirectoryPath
+        let workspaceDigest = Self.sha256Hex(for: Data(workspacePath.utf8))
+        workspaceCachePrefix = "\(URL(filePath: workspacePath).lastPathComponent)-\(workspaceDigest.prefix(12))"
+    }
 }
 
 extension XcodeBuild {
@@ -23,18 +45,36 @@ extension XcodeBuild.List {
 
 extension XcodeBuild {
     func list(checkCache: Bool = true) throws -> List {
-        let data = try exec(command: "-list", cacheURL: listCacheURL(), checkCache: checkCache)
-        let list = try decoder.decode(List.self, from: data)
-        return list
+        if checkCache, let data = withLock({ listMemoryCache }) {
+            return try decoder.decode(List.self, from: data)
+        }
+
+        let cacheURL = listCacheURL()
+        do {
+            let data = try exec(command: "-list", cacheURL: cacheURL, checkCache: checkCache)
+            let list = try decoder.decode(List.self, from: data)
+            if checkCache {
+                withLock {
+                    listMemoryCache = data
+                }
+            }
+            return list
+        } catch {
+            guard checkCache else {
+                throw error
+            }
+
+            let data = try exec(command: "-list", cacheURL: cacheURL, checkCache: false)
+            let list = try decoder.decode(List.self, from: data)
+            withLock {
+                listMemoryCache = data
+            }
+            return list
+        }
     }
 
     private func listCacheURL() -> URL {
-        // this will overwrite setting for multiple projects, need to revisit it soon
-        let url = cacheDir.appending(component: "list.json")
-        if FileManager.default.fileExists(atPath: url.path()) == false {
-            FileManager.default.createFile(atPath: url.path(), contents: nil)
-        }
-        return url
+        return cacheURL(fileName: "list.json")
     }
 }
 
@@ -58,21 +98,44 @@ extension XcodeBuild.Settings {
 
 extension XcodeBuild {
     func settingsForScheme(_ scheme: String, checkCache: Bool = true) throws -> [Settings] {
-        let data = try exec(
-            command: "-showBuildSettings -scheme \(scheme) 2>/dev/null",
-            cacheURL: settingsCacheURL(forScheme: scheme),
-            checkCache: checkCache
-        )
-        let settings = try decoder.decode([Settings].self, from: data)
-        return settings
+        if checkCache, let data = withLock({ settingsMemoryCache[scheme] }) {
+            return try decoder.decode([Settings].self, from: data)
+        }
+
+        let cacheURL = settingsCacheURL(forScheme: scheme)
+        do {
+            let data = try exec(
+                command: "-showBuildSettings -scheme \"\(scheme)\" 2>/dev/null",
+                cacheURL: cacheURL,
+                checkCache: checkCache
+            )
+            let settings = try decoder.decode([Settings].self, from: data)
+            if checkCache {
+                withLock {
+                    settingsMemoryCache[scheme] = data
+                }
+            }
+            return settings
+        } catch {
+            guard checkCache else {
+                throw error
+            }
+
+            let data = try exec(
+                command: "-showBuildSettings -scheme \"\(scheme)\" 2>/dev/null",
+                cacheURL: cacheURL,
+                checkCache: false
+            )
+            let settings = try decoder.decode([Settings].self, from: data)
+            withLock {
+                settingsMemoryCache[scheme] = data
+            }
+            return settings
+        }
     }
     
     private func settingsCacheURL(forScheme scheme: String) -> URL {
-        let url = cacheDir.appending(component: "\(scheme)-settings.json")
-        if FileManager.default.fileExists(atPath: url.path()) == false {
-            FileManager.default.createFile(atPath: url.path(), contents: nil)
-        }
-        return url
+        return cacheURL(fileName: "\(cacheToken(forScheme: scheme))-settings.json")
     }
 }
 
@@ -88,21 +151,44 @@ extension XcodeBuild {
 
 extension XcodeBuild {
     func settingsForIndex(forScheme scheme: String, checkCache: Bool = true) throws -> SettingsForIndex {
-        let data = try exec(
-            command: "-showBuildSettingsForIndex -scheme \(scheme) 2>/dev/null",
-            cacheURL: settingsForIndexCacheURL(forScheme: scheme),
-            checkCache: checkCache
-        )
-        let settings = try decoder.decode(SettingsForIndex.self, from: data)
-        return settings
+        if checkCache, let data = withLock({ settingsForIndexMemoryCache[scheme] }) {
+            return try decoder.decode(SettingsForIndex.self, from: data)
+        }
+
+        let cacheURL = settingsForIndexCacheURL(forScheme: scheme)
+        do {
+            let data = try exec(
+                command: "-showBuildSettingsForIndex -scheme \"\(scheme)\" 2>/dev/null",
+                cacheURL: cacheURL,
+                checkCache: checkCache
+            )
+            let settings = try decoder.decode(SettingsForIndex.self, from: data)
+            if checkCache {
+                withLock {
+                    settingsForIndexMemoryCache[scheme] = data
+                }
+            }
+            return settings
+        } catch {
+            guard checkCache else {
+                throw error
+            }
+
+            let data = try exec(
+                command: "-showBuildSettingsForIndex -scheme \"\(scheme)\" 2>/dev/null",
+                cacheURL: cacheURL,
+                checkCache: false
+            )
+            let settings = try decoder.decode(SettingsForIndex.self, from: data)
+            withLock {
+                settingsForIndexMemoryCache[scheme] = data
+            }
+            return settings
+        }
     }
 
     private func settingsForIndexCacheURL(forScheme scheme: String) -> URL {
-        let url = cacheDir.appending(component: "\(scheme)-settingsForIndex.json")
-        if FileManager.default.fileExists(atPath: url.path()) == false {
-            FileManager.default.createFile(atPath: url.path(), contents: nil)
-        }
-        return url
+        return cacheURL(fileName: "\(cacheToken(forScheme: scheme))-settingsForIndex.json")
     }
 }
 
@@ -124,8 +210,38 @@ extension XcodeBuild {
             return cachedData
         }
         catch {
+            if FileManager.default.fileExists(atPath: cacheURL.path()) == false {
+                FileManager.default.createFile(atPath: cacheURL.path(), contents: nil)
+            }
             let output = try shell("xcodebuild -json \(command)", output: cacheURL)
             return output.data
         }
+    }
+
+    private func cacheURL(fileName: String) -> URL {
+        let url = cacheDir.appending(component: "\(workspaceCachePrefix)-\(fileName)")
+        if FileManager.default.fileExists(atPath: url.path()) == false {
+            FileManager.default.createFile(atPath: url.path(), contents: nil)
+        }
+        return url
+    }
+
+    private func cacheToken(forScheme scheme: String) -> String {
+        let normalized = scheme
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "/", with: "_")
+        let digest = Self.sha256Hex(for: Data(scheme.utf8))
+        return "\(normalized)-\(digest.prefix(8))"
+    }
+
+    private func withLock<T>(_ work: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return work()
+    }
+
+    private static func sha256Hex(for data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

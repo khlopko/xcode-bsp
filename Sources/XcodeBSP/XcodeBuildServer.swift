@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import Logging
 
@@ -18,12 +17,12 @@ final class XcodeBuildServer: Sendable {
         let db = try Database(cacheDir: cacheDir)
         registry = HandlersRegistry(
             requestHandlers: [
-                BuildInitialize(xcodebuild: xcodebuild, cacheDir: cacheDir, logger: logger),
+                BuildInitialize(),
                 BuildShutdown(),
                 TextDocumentRegisterForChanges(),
-                WorkspaceBuildTargets(xcodebuild: xcodebuild, logger: logger),
-                BuildTargetPrepare(logger: logger),
-                BuildTargetSources(xcodebuild: xcodebuild, logger: logger),
+                WorkspaceBuildTargets(xcodebuild: xcodebuild),
+                BuildTargetPrepare(xcodebuild: xcodebuild, db: db, logger: logger),
+                BuildTargetSources(),
                 TextDocumentSourceKitOptions(xcodebuild: xcodebuild, db: db, logger: logger),
             ],
             notificationHandlers: [

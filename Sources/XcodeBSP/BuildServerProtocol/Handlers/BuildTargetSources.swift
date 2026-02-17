@@ -1,9 +1,6 @@
 import Foundation
-import Logging
 
 struct BuildTargetSources {
-    let xcodebuild: XcodeBuild
-    let logger: Logger
 }
 
 extension BuildTargetSources: MethodHandler {
@@ -13,25 +10,13 @@ extension BuildTargetSources: MethodHandler {
 
     func handle(request: Request<Params>, decoder: JSONDecoder) throws -> Result {
         var items: [Result.SourcesItem] = []
+        let sourceRoot = FileManager.default.currentDirectoryPath
         for target in request.params.targets {
-            let components = URLComponents(string: target.uri)
-            guard
-                let schemeItem = components?.queryItems?.first(where: { $0.name == "scheme" }),
-                let scheme = schemeItem.value 
-            else {
-                logger.error("missing scheme in \(target.uri)")
-                continue
-            }
-
-            guard let settings = try? xcodebuild.settingsForScheme(scheme).first(where: { $0.action == "build" }) else {
-                continue
-            }
-
             let item = Result.SourcesItem(
                 target: TargetID(uri: target.uri),
                 sources: [
                     Result.SourcesItem.SourceItem(
-                        uri: "file://" + settings.buildSettings.SOURCE_ROOT + "/",
+                        uri: "file://" + sourceRoot + "/",
                         kind: .dir,
                         generated: false
                     )
@@ -77,4 +62,3 @@ extension BuildTargetSources.Result.SourcesItem.SourceItem {
         case dir = 2
     }
 }
-

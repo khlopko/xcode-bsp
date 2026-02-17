@@ -1,9 +1,7 @@
 import Foundation
-import Logging
 
 struct WorkspaceBuildTargets {
     let xcodebuild: XcodeBuild
-    let logger: Logger
 }
 
 extension WorkspaceBuildTargets: MethodHandler {
@@ -16,17 +14,25 @@ extension WorkspaceBuildTargets: MethodHandler {
     func handle(request: Request<Params>, decoder: JSONDecoder) throws -> Result {
         var targets: [Result.Target] = []
 
-        let list = try xcodebuild.list()
         let config = try decoder.decode(Config.self, from: Data(contentsOf: Config.configURL()))
-        for scheme in config.activeSchemes {
-            // just taking first target with action: "build"
-            guard let settings = try? xcodebuild.settingsForScheme(scheme).first(where: { $0.action == "build" }) else {
-                continue
-            }
+        let schemes: [String]
+        if config.activeSchemes.isEmpty {
+            let list = try xcodebuild.list()
+            schemes = list.project.schemes
+        } else {
+            schemes = config.activeSchemes
+        }
+
+        let projectName = URL(filePath: FileManager.default.currentDirectoryPath).lastPathComponent
+        for scheme in schemes {
+            var components = URLComponents()
+            components.scheme = "xcode"
+            components.host = projectName
+            components.queryItems = [URLQueryItem(name: "scheme", value: scheme)]
 
             let target = Result.Target(
-                id: TargetID(uri: "xcode://\(list.project.name)?scheme=\(scheme)&target=\(settings.target)"),
-                displayName: settings.target
+                id: TargetID(uri: components.string ?? "xcode://\(projectName)?scheme=\(scheme)"),
+                displayName: scheme
             )
             targets.append(target)
         }
@@ -56,4 +62,3 @@ extension WorkspaceBuildTargets.Result {
     struct Capabilities: Encodable {
     }
 }
-
