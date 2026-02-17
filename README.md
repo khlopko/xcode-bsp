@@ -9,16 +9,19 @@ Xcode Build Server Protocol implementation in Swift.
 Aims to provide support for Xcode projects in other editors that rely on [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp). 
 
 ## current state
-Capable to run completion requests. Missing diagnostics. Really slow on start.
+Capable of completion requests through SourceKit-LSP. Diagnostics are not implemented yet.
+First request can be slow while caches are being populated.
 
-Implemented methods:
+Implemented BSP endpoints:
 - `build/initialize`
+- `build/initialized`
 - `build/shutdown`
 - `build/exit`
 - `textDocument/registerForChanges`
+- `workspace/didChangeWatchedFiles`
 - `workspace/buildTargets`
 - `buildTarget/sources`
-- `buildTarget/prepare` (currently disabled)
+- `buildTarget/prepare` (best-effort cache warmup)
 - `textDocument/sourceKitOptions`
 
 ## how to: install

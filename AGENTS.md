@@ -2,12 +2,21 @@
 
 This document is for coding agents working in this repository. It captures how to build, test, and follow existing coding style.
 
-Last verified: 2026-02-17
+Last verified: 2026-02-18
 
 ## Repository Overview
 - Swift Package Manager (SPM) executable target: `XcodeBSP`
 - Main entry point: `Sources/XcodeBSP/App.swift`
 - Protocol handlers under: `Sources/XcodeBSP/BuildServerProtocol/Handlers`
+
+## Implementation Snapshot
+- Transport is stdio JSON-RPC in `JSONRPCConnection` (reads `Content-Length` frames and writes encoded responses).
+- Request/notification dispatch happens in `XcodeBuildServer` through `HandlersRegistry`.
+- Xcode integration is centralized in `Xcode/XcodeBuild.swift` using `xcodebuild -json` (`-list`, `-showBuildSettings`, `-showBuildSettingsForIndex`).
+- Compiler arguments are cached in two layers:
+  - In-memory + file caches for raw `xcodebuild` JSON.
+  - SQLite cache (`Cache/Database.swift`) for normalized per-file compiler arguments.
+- Target IDs are URI-based (`xcode://<project>?scheme=<scheme>[&target=<target>]`).
 
 ## Build, Run, Lint, Test
 
@@ -16,6 +25,9 @@ Last verified: 2026-02-17
   - `swift build`
 - Release build:
   - `swift build -c release`
+- One-step setup/install on macOS:
+  - `./build_release.sh`
+  - Builds release binary, links `/usr/local/bin/xcode-bsp`, and copies a config template to clipboard.
 - Clean build artifacts:
   - `swift package clean`
 
@@ -25,6 +37,9 @@ Last verified: 2026-02-17
 - Run with an explicit action (see `App.swift`):
   - `swift run xcode-bsp config`
   - `swift run xcode-bsp server`
+- Run installed binary (recommended for project setup):
+  - `xcode-bsp config` (run in Xcode project root; interactively selects schemes and writes `.bsp/xcode-bsp.json`)
+  - `xcode-bsp server`
 
 ### Test
 - Run all tests (if/when tests exist):
@@ -95,6 +110,8 @@ Last verified: 2026-02-17
 - `method` should match the BSP method string exactly.
 - Keep handler logic focused; use helper types/services for heavy work.
 - Return `Response<Result>` via the `MethodHandler.handle` default implementation.
+- Notifications should conform to `NotificationMethodHandler`.
+- Current notification coverage includes `build/initialized`, `workspace/didChangeWatchedFiles`, and `build/exit`.
 
 ### File and Path Handling
 - Use `FileManager` and `URL` helpers.
@@ -119,11 +136,30 @@ Last verified: 2026-02-17
 - Config creation lives in `Sources/XcodeBSP/App.swift`.
 - Keep generated JSON in `Config` and use `JSONEncoder`.
 - Only update `.bsp/xcode-bsp.json` via `Config.configURL()`.
+- `xcode-bsp config` is interactive and stores selected schemes in `activeSchemes`.
+- If `activeSchemes` is missing or empty, all schemes from `xcodebuild -list` are used.
+- `workspace/buildTargets` and `build/initialize` both rely on config load succeeding.
+
+### Compiler Arguments Flow
+- Primary method is `textDocument/sourceKitOptions`.
+- Parse scheme/target from `TargetID.uri`, parse file path from `textDocument.uri`.
+- Read per-file args from `Database`; if missing, compute via `XcodeBuild.settingsForIndex`.
+- Sanitize unsupported/unstable args (`-use-frontend-parseable-output`, localized strings flags).
+- Detect missing SDK paths and refresh arguments with cache bypass before responding.
+- Persist refreshed args back to SQLite, scoped by scheme or `scheme::target`.
+
+### Caching Notes
+- Workspace-specific cache filenames are derived from workspace name + SHA256 digest.
+- `XcodeBuild` keeps memory caches and backs them with files in `~/Library/Caches/xcode-bsp`.
+- Database schema deduplicates argument payloads via `argument_sets(hash, payload)` and maps files via `file_arguments`.
+- Logs are JSON lines in `/tmp/xcode-bsp/default.log`.
 
 ### Common Commands Recap
 - Build debug: `swift build`
 - Build release: `swift build -c release`
+- Setup/install: `./build_release.sh`
 - Run: `swift run xcode-bsp`
+- Configure active schemes (project root): `xcode-bsp config`
 - Test all: `swift test`
 - Test single: `swift test --filter <ModuleTests>/<testName>`
 
@@ -131,6 +167,8 @@ Last verified: 2026-02-17
 - `Package.swift`: SwiftPM manifest and dependencies.
 - `Sources/XcodeBSP/App.swift`: CLI entry point.
 - `Sources/XcodeBSP/XcodeBuildServer.swift`: main server loop.
+- `Sources/XcodeBSP/JSONRPCConnection.swift`: stdio JSON-RPC transport.
+- `Sources/XcodeBSP/Xcode/XcodeBuild.swift`: `xcodebuild` adapter and caches.
 - `Sources/XcodeBSP/BuildServerProtocol/Handlers`: BSP method handlers.
 - `Sources/XcodeBSP/Logger.swift`: logging implementation.
 - `Sources/XcodeBSP/Cache/Database.swift`: SQLite cache storage.
