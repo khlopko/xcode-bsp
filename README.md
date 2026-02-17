@@ -1,6 +1,8 @@
 > [!Important]
 > State-of-the-art implementation, may contain issues or don't work on particular projects.
 
+![hero](hero.png)
+
 # xcode-bsp
 Xcode Build Server Protocol implementation in Swift. 
 
