@@ -22,35 +22,34 @@ Implemented methods:
 - `textDocument/sourceKitOptions`
 
 ## how to: install
-Right now there is zero automation provided by the tool, you have to configure it manually.
+There is now a setup script and an interactive config command.
 
-1. Clone the repo in convinient for you way.
-2. Build release version:
+1. Clone the repo.
+2. Run setup:
    ```sh
-   swift build -c release
+   ./build_release.sh
    ```
-3. Create link to `/usr/local/bin`:
+   This builds the release binary and installs a symlink to `/usr/local/bin/xcode-bsp`.
+3. In the root folder of your Xcode project, generate BSP config:
    ```sh
-   ln -s "{PWD}"/.build/release/xcode-bsp /usr/local/bin
+   xcode-bsp config
    ```
-4. In the root folder of the Xcode project create new directory:
-   ```sh
-   mkdir .bsp
-   ```
-5. Inside this directory, create new file `xcode-bsp.json` with following contents:
-   ```json
-   {
-     "name": "xcode-bsp",
-     "argv": ["/usr/local/bin/xcode-bsp"],
-     "version": "0.1.0",
-      "bspVersion": "2.0.0",
-      "languages": ["swift", "objective-c", "objective-cpp", "c", "cpp"],
-      "activeSchemes": []
-   }
-   ```
+   The command asks which schemes to include as active build targets and writes `.bsp/xcode-bsp.json`.
 
-   `activeSchemes` is optional. If omitted or empty, `xcode-bsp` will use all schemes from
-   `xcodebuild -list`.
+`activeSchemes` is optional in config. If omitted or empty, `xcode-bsp` uses all schemes from
+`xcodebuild -list`.
+
+Manual config is still supported. Example `.bsp/xcode-bsp.json`:
+```json
+{
+  "name": "xcode-bsp",
+  "argv": ["/usr/local/bin/xcode-bsp"],
+  "version": "0.1.0",
+  "bspVersion": "2.0.0",
+  "languages": ["swift", "objective-c", "objective-cpp", "c", "cpp"],
+  "activeSchemes": []
+}
+```
 
 Rest is up to [SourceKit's LSP](https://github.com/swiftlang/sourcekit-lsp/blob/ef1178867e7df7d3033d6ec764592fb71846cb67/Contributor%20Documentation/BSP%20Extensions.md).
 
