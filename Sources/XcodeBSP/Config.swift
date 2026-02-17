@@ -30,6 +30,9 @@ extension Config: Codable {
     }
 }
 
+extension Config: Sendable {
+}
+
 extension Config {
     func resolvedSchemes(from availableSchemes: [String]) -> [String] {
         if activeSchemes.isEmpty {

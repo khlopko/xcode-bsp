@@ -1,7 +1,16 @@
 import Foundation
 
 struct WorkspaceBuildTargets {
-    let xcodebuild: XcodeBuild
+    let xcodebuild: any XcodeBuildClient
+    let configProvider: any ConfigProvider
+
+    init(
+        xcodebuild: any XcodeBuildClient,
+        configProvider: any ConfigProvider = FileConfigProvider()
+    ) {
+        self.xcodebuild = xcodebuild
+        self.configProvider = configProvider
+    }
 }
 
 extension WorkspaceBuildTargets: MethodHandler {
@@ -14,10 +23,10 @@ extension WorkspaceBuildTargets: MethodHandler {
     func handle(request: Request<Params>, decoder: JSONDecoder) throws -> Result {
         var targets: [Result.Target] = []
 
-        let config = try decoder.decode(Config.self, from: Data(contentsOf: Config.configURL()))
+        let config = try configProvider.load(decoder: decoder)
         let schemes: [String]
         if config.activeSchemes.isEmpty {
-            let list = try xcodebuild.list()
+            let list = try xcodebuild.list(checkCache: true)
             schemes = list.project.schemes
         } else {
             schemes = config.activeSchemes

@@ -25,5 +25,12 @@ let package = Package(
                 .product(name: "SQLite", package: "SQLite.swift"),
             ]
         ),
+        .testTarget(
+            name: "XcodeBSPTests",
+            dependencies: [
+                "XcodeBSP",
+                .product(name: "Logging", package: "swift-log"),
+            ]
+        ),
     ]
 )

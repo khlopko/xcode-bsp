@@ -1,6 +1,11 @@
 import Foundation
 
 struct BuildInitialize {
+    let configProvider: any ConfigProvider
+
+    init(configProvider: any ConfigProvider = FileConfigProvider()) {
+        self.configProvider = configProvider
+    }
 }
 
 extension BuildInitialize: MethodHandler {
@@ -9,7 +14,7 @@ extension BuildInitialize: MethodHandler {
     }
 
     func handle(request: Request<Params>, decoder: JSONDecoder) throws -> Result {
-        _ = try decoder.decode(Config.self, from: Data(contentsOf: Config.configURL()))
+        _ = try configProvider.load(decoder: decoder)
 
         let sourceKitData = Result.SourceKitData(indexDatabasePath: nil, indexStorePath: nil)
 

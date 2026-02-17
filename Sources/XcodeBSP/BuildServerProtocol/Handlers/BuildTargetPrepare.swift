@@ -2,8 +2,8 @@ import Foundation
 import Logging
 
 struct BuildTargetPrepare {
-    let xcodebuild: XcodeBuild
-    let db: Database
+    let xcodebuild: any XcodeBuildClient
+    let db: any ArgumentsStore
     let logger: Logger
 }
 
