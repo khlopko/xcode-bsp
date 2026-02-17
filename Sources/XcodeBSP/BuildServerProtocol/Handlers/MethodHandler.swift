@@ -18,26 +18,57 @@ extension MethodHandler {
     }
 }
 
-struct EmptyParams: Decodable {
+protocol NotificationMethodHandler: Sendable {
+    associatedtype Params: Decodable & Sendable
+
+    var method: String { get }
+
+    func handle(notification: Notification<Params>, decoder: JSONDecoder) async throws
+}
+
+extension NotificationMethodHandler {
+    func handle(data: Data, decoder: JSONDecoder) async throws {
+        let notification = try decoder.decode(Notification<Params>.self, from: data)
+        try await handle(notification: notification, decoder: decoder)
+    }
+}
+
+struct EmptyParams: Decodable, Sendable {
 }
 
 struct EmptyResult: Encodable {
 }
 
 struct HandlersRegistry: Sendable {
-    private let handlersByMethod: [String: any MethodHandler]
+    private let requestHandlersByMethod: [String: any MethodHandler]
+    private let notificationHandlersByMethod: [String: any NotificationMethodHandler]
 
-    init(handlers: [any MethodHandler]) {
-        var handlersByMethod: [String: any MethodHandler] = [:]
-        for handler in handlers {
-            assert(handlersByMethod[handler.method] == nil, "duplicated handler for \(handler.method)")
-            handlersByMethod[handler.method] = handler
+    init(
+        requestHandlers: [any MethodHandler],
+        notificationHandlers: [any NotificationMethodHandler] = []
+    ) {
+        var requestHandlersByMethod: [String: any MethodHandler] = [:]
+        for handler in requestHandlers {
+            assert(requestHandlersByMethod[handler.method] == nil, "duplicated request handler for \(handler.method)")
+            requestHandlersByMethod[handler.method] = handler
         }
-        self.handlersByMethod = handlersByMethod
+
+        var notificationHandlersByMethod: [String: any NotificationMethodHandler] = [:]
+        for handler in notificationHandlers {
+            assert(requestHandlersByMethod[handler.method] == nil, "handler for \(handler.method) cannot be both request and notification")
+            assert(notificationHandlersByMethod[handler.method] == nil, "duplicated notification handler for \(handler.method)")
+            notificationHandlersByMethod[handler.method] = handler
+        }
+
+        self.requestHandlersByMethod = requestHandlersByMethod
+        self.notificationHandlersByMethod = notificationHandlersByMethod
     }
 
-    func handler(for message: JSONRPCConnection.Message) -> (any MethodHandler)? {
-        return handlersByMethod[message.method]
+    func requestHandler(for message: JSONRPCConnection.Message) -> (any MethodHandler)? {
+        return requestHandlersByMethod[message.method]
+    }
+
+    func notificationHandler(for message: JSONRPCConnection.Message) -> (any NotificationMethodHandler)? {
+        return notificationHandlersByMethod[message.method]
     }
 }
-

@@ -15,6 +15,9 @@ struct XcodeBSPApp: ParsableCommand {
         let action = action ?? .server
         let cacheDir = FileManager.default.homeDirectoryForCurrentUser
             .appending(components: "Library", "Caches", "xcode-bsp")
+        if FileManager.default.fileExists(atPath: cacheDir.path()) == false {
+            try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        }
         switch action {
         case .config:
             print("Loading project config")

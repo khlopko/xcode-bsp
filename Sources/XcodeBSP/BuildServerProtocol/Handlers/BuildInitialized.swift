@@ -1,16 +1,15 @@
 import Foundation
 
-struct BuildExit {
+struct BuildInitialized {
 }
 
-extension BuildExit: NotificationMethodHandler {
+extension BuildInitialized: NotificationMethodHandler {
     typealias Params = EmptyParams
 
     var method: String {
-        return "build/exit"
+        return "build/initialized"
     }
 
     func handle(notification: Notification<Params>, decoder: JSONDecoder) async throws {
-        exit(0)
     }
 }

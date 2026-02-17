@@ -29,6 +29,30 @@ final class JSONRPCConnection: Sendable {
 extension JSONRPCConnection {
     struct Message: Decodable {
         let method: String
+
+        let id: String?
+
+        var isNotification: Bool {
+            return id == nil
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+
+            method = try container.decode(String.self, forKey: .method)
+            if let id = try? container.decode(String.self, forKey: .id) {
+                self.id = id
+            } else if let id = try? container.decode(Int.self, forKey: .id) {
+                self.id = id.description
+            } else {
+                self.id = nil
+            }
+        }
+
+        private enum CodingKeys: CodingKey {
+            case method
+            case id
+        }
     }
 }
 
@@ -113,4 +137,3 @@ extension JSONRPCConnection.InvalidMessageError.Reason: CustomStringConvertible 
         }
     }
 }
-
