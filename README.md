@@ -1,31 +1,43 @@
-> [!Important]
-> State-of-the-art implementation, may contain issues or don't work on particular projects.
+> [!WARNING]
+> Alpha software (v0.2.x). Ready for early adopters, but not yet stable.
 
 ![hero](hero.png)
 
 # xcode-bsp
-Xcode Build Server Protocol implementation in Swift. 
+Xcode Build Server Protocol implementation in Swift.
 
-Aims to provide support for Xcode projects in other editors that rely on [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp). 
+Aims to provide support for Xcode projects in editors that rely on [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp).
 
-## current state
-Capable of completion requests through SourceKit-LSP. Diagnostics are not implemented yet.
-First request can be slow while caches are being populated.
+## status
+- Stage: **Alpha / Early Access** (`0.2.x`).
+- Readiness: usable for early adopters and daily experimentation.
+- Not yet implemented: diagnostics support.
+- Expected behavior: first requests can be slower while caches are populated.
+- Platform requirement: `macOS 14+` (`Package.swift`).
 
-Implemented BSP endpoints:
+## implemented protocol surface
+Incoming requests:
 - `build/initialize`
-- `build/initialized`
 - `build/shutdown`
-- `build/exit`
-- `textDocument/registerForChanges`
-- `workspace/didChangeWatchedFiles`
 - `workspace/buildTargets`
+- `workspace/waitForBuildSystemUpdates`
+- `textDocument/registerForChanges`
 - `buildTarget/sources`
+- `buildTarget/inverseSources`
 - `buildTarget/prepare` (best-effort cache warmup)
 - `textDocument/sourceKitOptions`
 
-## how to: install
-There is now a setup script and an interactive config command.
+Incoming notifications:
+- `build/initialized`
+- `workspace/didChangeWatchedFiles`
+- `build/exit`
+
+Outgoing notifications:
+- `buildTarget/didChange`
+- `build/sourceKitOptionsChanged`
+
+## install
+Use the setup script and interactive config command.
 
 1. Clone the repo.
 2. Run setup:
@@ -49,10 +61,19 @@ Manual config is still supported. Example `.bsp/xcode-bsp.json`:
   "argv": ["/usr/local/bin/xcode-bsp"],
   "version": "0.2.0",
   "bspVersion": "2.0.0",
-  "languages": ["swift", "objective-c", "objective-cpp", "c", "cpp"],
+  "languages": ["swift", "objective-c", "objective-cpp"],
   "activeSchemes": []
 }
 ```
+
+## known limitations
+- Diagnostics are not implemented yet.
+- Project-specific edge cases still exist.
+- Cache warmup can make first-response latency noticeably higher.
+
+## development
+- Build: `swift build`
+- Test: `swift test`
 
 Rest is up to [SourceKit's LSP](https://github.com/swiftlang/sourcekit-lsp/blob/ef1178867e7df7d3033d6ec764592fb71846cb67/Contributor%20Documentation/BSP%20Extensions.md).
 
