@@ -5,6 +5,19 @@ struct BuildTargetPrepare {
     let xcodebuild: any XcodeBuildClient
     let db: any ArgumentsStore
     let logger: Logger
+    let state: BuildSystemState
+
+    init(
+        xcodebuild: any XcodeBuildClient,
+        db: any ArgumentsStore,
+        logger: Logger,
+        state: BuildSystemState
+    ) {
+        self.xcodebuild = xcodebuild
+        self.db = db
+        self.logger = logger
+        self.state = state
+    }
 }
 
 extension BuildTargetPrepare: MethodHandler {
@@ -15,7 +28,9 @@ extension BuildTargetPrepare: MethodHandler {
     }
 
     func handle(request: Request<Params>, decoder: JSONDecoder) async throws -> Result {
+        await state.beginUpdate()
         await prepareTargets(request.params.targets)
+        await state.endUpdate()
         return Result()
     }
 }

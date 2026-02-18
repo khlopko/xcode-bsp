@@ -3,6 +3,12 @@ import Logging
 
 struct WorkspaceDidChangeWatchedFiles {
     let logger: Logger
+    let state: BuildSystemState
+
+    init(logger: Logger, state: BuildSystemState) {
+        self.logger = logger
+        self.state = state
+    }
 }
 
 extension WorkspaceDidChangeWatchedFiles: NotificationMethodHandler {
@@ -11,8 +17,10 @@ extension WorkspaceDidChangeWatchedFiles: NotificationMethodHandler {
     }
 
     func handle(notification: Notification<Params>, decoder: JSONDecoder) async throws {
+        await state.beginUpdate()
         let changedFilesCount = notification.params?.changes.count ?? 0
         logger.trace("workspace/didChangeWatchedFiles with \(changedFilesCount) changes")
+        await state.endUpdate()
     }
 }
 

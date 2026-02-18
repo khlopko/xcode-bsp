@@ -1,6 +1,11 @@
 import Foundation
 
 struct BuildExit {
+    let state: BuildSystemState
+
+    init(state: BuildSystemState) {
+        self.state = state
+    }
 }
 
 extension BuildExit: NotificationMethodHandler {
@@ -11,6 +16,7 @@ extension BuildExit: NotificationMethodHandler {
     }
 
     func handle(notification: Notification<Params>, decoder: JSONDecoder) async throws {
-        exit(0)
+        let exitCode = await state.hasReceivedShutdown() ? 0 : 1
+        exit(Int32(exitCode))
     }
 }

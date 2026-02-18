@@ -1,6 +1,6 @@
 import Foundation
 
-struct BuildShutdown {
+struct WorkspaceWaitForBuildSystemUpdates {
     let state: BuildSystemState
 
     init(state: BuildSystemState) {
@@ -8,16 +8,20 @@ struct BuildShutdown {
     }
 }
 
-extension BuildShutdown: MethodHandler {
-    typealias Params = EmptyParams
+extension WorkspaceWaitForBuildSystemUpdates: MethodHandler {
     typealias Result = EmptyResult
 
     var method: String {
-        return "build/shutdown"
+        return "workspace/waitForBuildSystemUpdates"
     }
 
     func handle(request: Request<Params>, decoder: JSONDecoder) async throws -> Result {
-        await state.markShutdownReceived()
+        await state.waitForIdle()
         return Result()
+    }
+}
+
+extension WorkspaceWaitForBuildSystemUpdates {
+    struct Params: Decodable {
     }
 }

@@ -31,7 +31,8 @@ final class BuildTargetPrepareTests: XCTestCase {
         let handler = BuildTargetPrepare(
             xcodebuild: xcodebuild,
             db: db,
-            logger: makeTestLogger()
+            logger: makeTestLogger(),
+            state: BuildSystemState()
         )
 
         _ = try await handler.handle(
@@ -71,7 +72,8 @@ final class BuildTargetPrepareTests: XCTestCase {
         let handler = BuildTargetPrepare(
             xcodebuild: xcodebuild,
             db: db,
-            logger: makeTestLogger()
+            logger: makeTestLogger(),
+            state: BuildSystemState()
         )
 
         _ = try await handler.handle(
