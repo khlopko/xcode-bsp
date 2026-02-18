@@ -16,7 +16,7 @@ extension TextDocumentRegisterForChanges: MethodHandler {
     }
 
     func handle(request: Request<Params>, decoder: JSONDecoder) async throws -> Result {
-        await state.updateRegistration(action: request.params.action)
+        await state.updateRegistration(action: request.params.action, uri: request.params.uri)
         return Result()
     }
 }
@@ -24,5 +24,6 @@ extension TextDocumentRegisterForChanges: MethodHandler {
 extension TextDocumentRegisterForChanges {
     struct Params: Decodable {
         let action: String?
+        let uri: String?
     }
 }

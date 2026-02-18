@@ -4,35 +4,35 @@ import Logging
 final class XcodeBuildServer: Sendable {
     private let conn: JSONRPCConnection
     private let decoder: JSONDecoder
-    private let encoder: JSONEncoder
     private let logger: Logger
     private let registry: HandlersRegistry
     private let state: BuildSystemState
 
     init(cacheDir: URL) throws {
         decoder = JSONDecoder()
-        encoder = JSONEncoder()
         logger = try makeLogger(label: "xcode-bsp")
         conn = JSONRPCConnection(logger: logger)
         state = BuildSystemState()
 
         let xcodebuild = XcodeBuild(cacheDir: cacheDir, decoder: decoder, logger: logger)
         let db = try Database(cacheDir: cacheDir)
+        let graph = BuildGraphService(xcodebuild: xcodebuild, logger: logger)
+
         registry = HandlersRegistry(
             requestHandlers: [
-                BuildInitialize(xcodebuild: xcodebuild, cacheDir: cacheDir, logger: logger),
+                BuildInitialize(graph: graph, cacheDir: cacheDir),
                 BuildShutdown(state: state),
                 TextDocumentRegisterForChanges(state: state),
-                WorkspaceBuildTargets(xcodebuild: xcodebuild),
-                BuildTargetPrepare(xcodebuild: xcodebuild, db: db, logger: logger, state: state),
-                BuildTargetSources(xcodebuild: xcodebuild),
-                BuildTargetInverseSources(xcodebuild: xcodebuild),
+                WorkspaceBuildTargets(graph: graph),
+                BuildTargetPrepare(graph: graph, db: db, logger: logger, state: state),
+                BuildTargetSources(graph: graph),
+                BuildTargetInverseSources(graph: graph),
                 WorkspaceWaitForBuildSystemUpdates(state: state),
-                TextDocumentSourceKitOptions(xcodebuild: xcodebuild, db: db, logger: logger),
+                TextDocumentSourceKitOptions(graph: graph, state: state, logger: logger),
             ],
             notificationHandlers: [
                 BuildInitialized(),
-                WorkspaceDidChangeWatchedFiles(logger: logger, state: state),
+                WorkspaceDidChangeWatchedFiles(logger: logger, state: state, graph: graph),
                 BuildExit(state: state),
             ]
         )
@@ -56,7 +56,7 @@ extension XcodeBuildServer {
                     self.logger.debug("notification for \(msg.method) handled")
                 }
 
-                try await self.maybeSendBuildTargetDidChange(afterMethod: msg.method)
+                try await self.sendPendingNotifications()
             } catch let error as UnhandledMethodError {
                 switch error.kind {
                 case .request:
@@ -117,21 +117,60 @@ extension XcodeBuildServer {
         return .responseSent
     }
 
-    private func maybeSendBuildTargetDidChange(afterMethod method: String) async throws {
-        guard method == "workspace/didChangeWatchedFiles" else {
-            return
+    private func sendPendingNotifications() async throws {
+        let pending = await state.drainPendingChanges()
+
+        if pending.changedTargetURIs.isEmpty == false {
+            let changes = pending.changedTargetURIs.map {
+                BuildTargetDidChange(target: TargetID(uri: $0), kind: .changed)
+            }
+            try conn.send(
+                message: JSONRPCNotificationMessage(
+                    method: "buildTarget/didChange",
+                    params: BuildTargetDidChangeParams(changes: changes)
+                )
+            )
         }
 
         guard await state.hasRegisteredDocuments() else {
             return
         }
 
-        try conn.send(
-            message: JSONRPCNotificationMessage(
-                method: "buildTarget/didChange",
-                params: BuildTargetDidChangeParams(changes: nil)
+        let registeredURIs = await state.registeredDocumentURIs()
+        for uri in registeredURIs {
+            guard let filePath = filePath(fromDocumentURI: uri) else {
+                continue
+            }
+
+            let resolved = URL(filePath: filePath).resolvingSymlinksInPath().path()
+            guard
+                let options = pending.changedOptionsByFilePath[filePath]
+                    ?? pending.changedOptionsByFilePath[resolved]
+            else {
+                continue
+            }
+
+            try conn.send(
+                message: JSONRPCNotificationMessage(
+                    method: "build/sourceKitOptionsChanged",
+                    params: BuildSourceKitOptionsChangedParams(
+                        uri: uri,
+                        updatedOptions: BuildSourceKitOptionsChangedParams.UpdatedOptions(
+                            options: options.options,
+                            workingDirectory: options.workingDirectory
+                        )
+                    )
+                )
             )
-        )
+        }
+    }
+
+    private func filePath(fromDocumentURI documentURI: String) -> String? {
+        guard let url = URL(string: documentURI), url.isFileURL else {
+            return nil
+        }
+
+        return URL(filePath: url.path()).standardizedFileURL.path()
     }
 
     private enum DispatchOutcome {
@@ -179,5 +218,17 @@ private struct BuildTargetDidChange: Encodable {
     enum Kind: Int, Encodable {
         case changed = 1
         case deleted = 2
+    }
+}
+
+private struct BuildSourceKitOptionsChangedParams: Encodable {
+    let uri: String
+    let updatedOptions: UpdatedOptions
+}
+
+extension BuildSourceKitOptionsChangedParams {
+    struct UpdatedOptions: Encodable {
+        let options: [String]
+        let workingDirectory: String?
     }
 }

@@ -27,9 +27,14 @@ final class BuildTargetPrepareTests: XCTestCase {
                 ]
             ]
         )
+        let graph = BuildGraphService(
+            xcodebuild: xcodebuild,
+            logger: makeTestLogger(),
+            configProvider: StaticConfigProvider(config: makeConfig(activeSchemes: ["App"]))
+        )
         let db = InMemoryArgumentsStore()
         let handler = BuildTargetPrepare(
-            xcodebuild: xcodebuild,
+            graph: graph,
             db: db,
             logger: makeTestLogger(),
             state: BuildSystemState()
@@ -68,9 +73,14 @@ final class BuildTargetPrepareTests: XCTestCase {
                 ]
             ]
         )
+        let graph = BuildGraphService(
+            xcodebuild: xcodebuild,
+            logger: makeTestLogger(),
+            configProvider: StaticConfigProvider(config: makeConfig(activeSchemes: ["App"]))
+        )
         let db = InMemoryArgumentsStore()
         let handler = BuildTargetPrepare(
-            xcodebuild: xcodebuild,
+            graph: graph,
             db: db,
             logger: makeTestLogger(),
             state: BuildSystemState()
@@ -90,4 +100,15 @@ final class BuildTargetPrepareTests: XCTestCase {
         let stored = await db.args(filePath: filePath, scheme: "App::UnitTests")
         XCTAssertEqual(stored, ["swiftc"])
     }
+}
+
+private func makeConfig(activeSchemes: [String]) -> Config {
+    return Config(
+        name: "xcode-bsp",
+        argv: ["/usr/local/bin/xcode-bsp"],
+        version: "0.1.0",
+        bspVersion: "2.0.0",
+        languages: ["swift"],
+        activeSchemes: activeSchemes
+    )
 }

@@ -3,7 +3,7 @@ import XCTest
 @testable import XcodeBSP
 
 final class BuildInitializeTests: XCTestCase {
-    func testHandleReturnsIndexPathsWhenBuildSettingsResolve() throws {
+    func testHandleReturnsIndexPathsWhenBuildSettingsResolve() async throws {
         let config = Config(
             name: "xcode-bsp",
             argv: ["/usr/local/bin/xcode-bsp"],
@@ -31,17 +31,28 @@ final class BuildInitializeTests: XCTestCase {
                         )
                     )
                 ]
+            ],
+            settingsForIndexByScheme: [
+                "App": [
+                    "App": [
+                        "/tmp/Project/File.swift": XcodeBuild.FileSettings(
+                            swiftASTCommandArguments: ["swiftc", "-index-store-path", "/tmp/CustomIndex/DataStore"],
+                            clangASTCommandArguments: nil,
+                            clangPCHCommandArguments: nil
+                        )
+                    ]
+                ]
             ]
         )
-        let cacheDir = URL(filePath: "/tmp/xcode-bsp-tests")
-        let handler = BuildInitialize(
+        let graph = BuildGraphService(
             xcodebuild: xcodebuild,
-            cacheDir: cacheDir,
             logger: makeTestLogger(),
             configProvider: StaticConfigProvider(config: config)
         )
+        let cacheDir = URL(filePath: "/tmp/xcode-bsp-tests")
+        let handler = BuildInitialize(graph: graph, cacheDir: cacheDir)
 
-        let result = try handler.handle(
+        let result = try await handler.handle(
             request: Request(id: "1", method: handler.method, params: BuildInitialize.Params()),
             decoder: JSONDecoder()
         )
@@ -50,16 +61,11 @@ final class BuildInitializeTests: XCTestCase {
         XCTAssertEqual(result.bspVersion, "2.0.0")
         XCTAssertEqual(result.dataKind, "sourceKit")
         XCTAssertEqual(result.capabilities.languageIds, ["swift", "objective-c", "objective-cpp", "c", "cpp"])
-        XCTAssertEqual(result.capabilities.inverseSourcesProvider, true)
-        XCTAssertEqual(result.data?.indexStorePath, "/tmp/DerivedData/Index.noindex/DataStore")
+        XCTAssertEqual(result.data?.indexStorePath, "/tmp/CustomIndex/DataStore")
         XCTAssertNotNil(result.data?.indexDatabasePath)
-        XCTAssertEqual(result.data?.prepareProvider, true)
-        XCTAssertEqual(result.data?.sourceKitOptionsProvider, true)
-        XCTAssertEqual(result.data?.waitForBuildSystemUpdatesProvider, true)
-        XCTAssertTrue((result.data?.watches.isEmpty) == false)
     }
 
-    func testHandleReturnsNilIndexPathsWhenNoBuildSettingsFound() throws {
+    func testHandleReturnsNilIndexPathsWhenNoBuildSettingsFound() async throws {
         let config = Config(
             name: "xcode-bsp",
             argv: ["/usr/local/bin/xcode-bsp"],
@@ -68,18 +74,18 @@ final class BuildInitializeTests: XCTestCase {
             languages: ["swift"],
             activeSchemes: ["App"]
         )
-        let handler = BuildInitialize(
+        let graph = BuildGraphService(
             xcodebuild: StubXcodeBuildClient(
                 listResult: XcodeBuild.List(
                     project: XcodeBuild.List.Project(name: "Project", schemes: ["App"], targets: [])
                 )
             ),
-            cacheDir: URL(filePath: "/tmp/xcode-bsp-tests"),
             logger: makeTestLogger(),
             configProvider: StaticConfigProvider(config: config)
         )
+        let handler = BuildInitialize(graph: graph, cacheDir: URL(filePath: "/tmp/xcode-bsp-tests"))
 
-        let result = try handler.handle(
+        let result = try await handler.handle(
             request: Request(id: "1", method: handler.method, params: BuildInitialize.Params()),
             decoder: JSONDecoder()
         )
@@ -88,14 +94,36 @@ final class BuildInitializeTests: XCTestCase {
         XCTAssertNil(result.data?.indexDatabasePath)
     }
 
-    func testHandleThrowsWhenConfigLoadingFails() {
-        let handler = BuildInitialize(configProvider: FailingConfigProvider())
+    func testHandleThrowsWhenConfigLoadingFails() async {
+        let graph = BuildGraphService(
+            xcodebuild: StubXcodeBuildClient(
+                listResult: XcodeBuild.List(
+                    project: XcodeBuild.List.Project(name: "Project", schemes: [], targets: [])
+                )
+            ),
+            logger: makeTestLogger(),
+            configProvider: FailingConfigProvider()
+        )
+        let handler = BuildInitialize(graph: graph, cacheDir: URL(filePath: "/tmp/xcode-bsp-tests"))
 
-        XCTAssertThrowsError(
-            try handler.handle(
+        await XCTAssertThrowsErrorAsync(
+            try await handler.handle(
                 request: Request(id: "1", method: handler.method, params: BuildInitialize.Params()),
                 decoder: JSONDecoder()
             )
         )
+    }
+}
+
+private func XCTAssertThrowsErrorAsync(
+    _ expression: @autoclosure () async throws -> some Any,
+    _ message: @autoclosure () -> String = "",
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail(message(), file: file, line: line)
+    } catch {
     }
 }

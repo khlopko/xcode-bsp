@@ -3,7 +3,7 @@ import XCTest
 @testable import XcodeBSP
 
 final class WorkspaceBuildTargetsTests: XCTestCase {
-    func testUsesActiveSchemesFromConfigWithoutCallingXcodebuildList() throws {
+    func testUsesActiveSchemesFromConfigWithoutCallingXcodebuildList() async throws {
         let xcodebuild = StubXcodeBuildClient(
             listResult: XcodeBuild.List(
                 project: XcodeBuild.List.Project(name: "Project", schemes: ["Ignored"], targets: [])
@@ -18,11 +18,14 @@ final class WorkspaceBuildTargetsTests: XCTestCase {
             activeSchemes: ["App", "Library"]
         )
         let handler = WorkspaceBuildTargets(
-            xcodebuild: xcodebuild,
-            configProvider: StaticConfigProvider(config: config)
+            graph: BuildGraphService(
+                xcodebuild: xcodebuild,
+                logger: makeTestLogger(),
+                configProvider: StaticConfigProvider(config: config)
+            )
         )
 
-        let result = try handler.handle(
+        let result = try await handler.handle(
             request: Request(id: "1", method: handler.method, params: EmptyParams()),
             decoder: JSONDecoder()
         )
@@ -31,7 +34,7 @@ final class WorkspaceBuildTargetsTests: XCTestCase {
         XCTAssertEqual(xcodebuild.listCallCount, 0)
     }
 
-    func testFallsBackToXcodebuildListWhenNoActiveSchemes() throws {
+    func testFallsBackToXcodebuildListWhenNoActiveSchemes() async throws {
         let xcodebuild = StubXcodeBuildClient(
             listResult: XcodeBuild.List(
                 project: XcodeBuild.List.Project(name: "Project", schemes: ["App", "Library"], targets: [])
@@ -46,11 +49,14 @@ final class WorkspaceBuildTargetsTests: XCTestCase {
             activeSchemes: []
         )
         let handler = WorkspaceBuildTargets(
-            xcodebuild: xcodebuild,
-            configProvider: StaticConfigProvider(config: config)
+            graph: BuildGraphService(
+                xcodebuild: xcodebuild,
+                logger: makeTestLogger(),
+                configProvider: StaticConfigProvider(config: config)
+            )
         )
 
-        let result = try handler.handle(
+        let result = try await handler.handle(
             request: Request(id: "1", method: handler.method, params: EmptyParams()),
             decoder: JSONDecoder()
         )
@@ -59,7 +65,7 @@ final class WorkspaceBuildTargetsTests: XCTestCase {
         XCTAssertEqual(xcodebuild.listCallCount, 1)
     }
 
-    func testAddsNestedTargetDependenciesWhenIndexSettingsContainTargets() throws {
+    func testAddsNestedTargetDependenciesWhenIndexSettingsContainTargets() async throws {
         let filePath = URL(filePath: "/tmp/Project/File.swift").standardizedFileURL.path()
         let xcodebuild = StubXcodeBuildClient(
             listResult: XcodeBuild.List(
@@ -86,11 +92,14 @@ final class WorkspaceBuildTargetsTests: XCTestCase {
             activeSchemes: ["App"]
         )
         let handler = WorkspaceBuildTargets(
-            xcodebuild: xcodebuild,
-            configProvider: StaticConfigProvider(config: config)
+            graph: BuildGraphService(
+                xcodebuild: xcodebuild,
+                logger: makeTestLogger(),
+                configProvider: StaticConfigProvider(config: config)
+            )
         )
 
-        let result = try handler.handle(
+        let result = try await handler.handle(
             request: Request(id: "1", method: handler.method, params: EmptyParams()),
             decoder: JSONDecoder()
         )

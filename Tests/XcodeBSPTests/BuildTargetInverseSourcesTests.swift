@@ -3,7 +3,7 @@ import XCTest
 @testable import XcodeBSP
 
 final class BuildTargetInverseSourcesTests: XCTestCase {
-    func testReturnsTargetsContainingFile() throws {
+    func testReturnsTargetsContainingFile() async throws {
         let filePath = URL(filePath: "/tmp/Project/File.swift").standardizedFileURL.path()
         let xcodebuild = StubXcodeBuildClient(
             listResult: XcodeBuild.List(
@@ -29,12 +29,14 @@ final class BuildTargetInverseSourcesTests: XCTestCase {
             languages: ["swift"],
             activeSchemes: ["App"]
         )
-        let handler = BuildTargetInverseSources(
+        let graph = BuildGraphService(
             xcodebuild: xcodebuild,
+            logger: makeTestLogger(),
             configProvider: StaticConfigProvider(config: config)
         )
+        let handler = BuildTargetInverseSources(graph: graph)
 
-        let result = try handler.handle(
+        let result = try await handler.handle(
             request: Request(
                 id: "1",
                 method: handler.method,
@@ -45,31 +47,33 @@ final class BuildTargetInverseSourcesTests: XCTestCase {
             decoder: JSONDecoder()
         )
 
-        XCTAssertEqual(result.targets.count, 1)
-        XCTAssertEqual(result.targets.first?.uri.contains("scheme=App"), true)
-        XCTAssertEqual(result.targets.first?.uri.contains("target=UnitTests"), true)
+        XCTAssertEqual(result.targets.count, 2)
+        XCTAssertEqual(result.targets.contains(where: { $0.uri.contains("scheme=App") }), true)
+        XCTAssertEqual(result.targets.contains(where: { $0.uri.contains("target=UnitTests") }), true)
     }
 
-    func testReturnsEmptyForNonFileURI() throws {
+    func testReturnsEmptyForNonFileURI() async throws {
+        let config = Config(
+            name: "xcode-bsp",
+            argv: ["/usr/local/bin/xcode-bsp"],
+            version: "0.1.0",
+            bspVersion: "2.0.0",
+            languages: ["swift"],
+            activeSchemes: ["App"]
+        )
         let handler = BuildTargetInverseSources(
-            xcodebuild: StubXcodeBuildClient(
-                listResult: XcodeBuild.List(
-                    project: XcodeBuild.List.Project(name: "Project", schemes: ["App"], targets: [])
-                )
-            ),
-            configProvider: StaticConfigProvider(
-                config: Config(
-                    name: "xcode-bsp",
-                    argv: ["/usr/local/bin/xcode-bsp"],
-                    version: "0.1.0",
-                    bspVersion: "2.0.0",
-                    languages: ["swift"],
-                    activeSchemes: ["App"]
-                )
+            graph: BuildGraphService(
+                xcodebuild: StubXcodeBuildClient(
+                    listResult: XcodeBuild.List(
+                        project: XcodeBuild.List.Project(name: "Project", schemes: ["App"], targets: [])
+                    )
+                ),
+                logger: makeTestLogger(),
+                configProvider: StaticConfigProvider(config: config)
             )
         )
 
-        let result = try handler.handle(
+        let result = try await handler.handle(
             request: Request(
                 id: "1",
                 method: handler.method,

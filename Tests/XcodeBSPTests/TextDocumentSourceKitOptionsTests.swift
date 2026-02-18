@@ -3,43 +3,7 @@ import XCTest
 @testable import XcodeBSP
 
 final class TextDocumentSourceKitOptionsTests: XCTestCase {
-    func testReturnsCachedArgumentsAndWorkingDirectory() async throws {
-        let filePath = URL(filePath: "/tmp/Project/File.swift").standardizedFileURL.path()
-        let arguments = ["swiftc", "-working-directory", "/tmp/Project"]
-
-        let xcodebuild = StubXcodeBuildClient(
-            listResult: XcodeBuild.List(
-                project: XcodeBuild.List.Project(name: "Project", schemes: [], targets: [])
-            )
-        )
-        let db = InMemoryArgumentsStore()
-        await db.seed(filePath: filePath, scheme: "App", arguments: arguments)
-
-        let handler = TextDocumentSourceKitOptions(
-            xcodebuild: xcodebuild,
-            db: db,
-            logger: makeTestLogger()
-        )
-
-        let result = try await handler.handle(
-            request: Request(
-                id: "1",
-                method: handler.method,
-                params: TextDocumentSourceKitOptions.Params(
-                    language: "swift",
-                    textDocument: TextDocumentSourceKitOptions.Params.TextDocument(uri: "file://\(filePath)"),
-                    target: TargetID(uri: "xcode://Project?scheme=App")
-                )
-            ),
-            decoder: JSONDecoder()
-        )
-
-        XCTAssertEqual(result.compilerArguments, arguments)
-        XCTAssertEqual(result.workingDirectory, "/tmp/Project")
-        XCTAssertTrue(xcodebuild.settingsForIndexCalls.isEmpty)
-    }
-
-    func testCacheMissLoadsFromXcodebuildAndPersistsArguments() async throws {
+    func testReturnsArgumentsAndWorkingDirectoryFromGraph() async throws {
         let filePath = URL(filePath: "/tmp/Project/File.swift").standardizedFileURL.path()
         let expected = ["swiftc", "-working-directory", "/tmp/Project"]
 
@@ -59,11 +23,15 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
                 ]
             ]
         )
-        let db = InMemoryArgumentsStore()
+        let graph = BuildGraphService(
+            xcodebuild: xcodebuild,
+            logger: makeTestLogger(),
+            configProvider: StaticConfigProvider(config: makeTextDocumentConfig())
+        )
 
         let handler = TextDocumentSourceKitOptions(
-            xcodebuild: xcodebuild,
-            db: db,
+            graph: graph,
+            state: BuildSystemState(),
             logger: makeTestLogger()
         )
 
@@ -81,38 +49,42 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
         )
 
         XCTAssertEqual(result.compilerArguments, expected)
-        let stored = await db.args(filePath: filePath, scheme: "App")
-        XCTAssertEqual(stored, expected)
+        XCTAssertEqual(result.workingDirectory, "/tmp/Project")
         XCTAssertEqual(xcodebuild.settingsForIndexCalls.first?.checkCache, true)
     }
 
-    func testMissingSDKInCacheRefreshesWithBypassCacheLookup() async throws {
+    func testCacheMissRefreshesWithBypassCacheLookup() async throws {
         let filePath = URL(filePath: "/tmp/Project/File.swift").standardizedFileURL.path()
-        let cached = ["swiftc", "-sdk", "/definitely/missing/sdk"]
         let refreshed = ["swiftc", "-working-directory", "/tmp/Project"]
 
         let xcodebuild = StubXcodeBuildClient(
             listResult: XcodeBuild.List(
                 project: XcodeBuild.List.Project(name: "Project", schemes: [], targets: [])
             ),
-            settingsForIndexByScheme: [
+            settingsForIndexBySchemeAndCache: [
                 "App": [
-                    "App": [
-                        filePath: XcodeBuild.FileSettings(
-                            swiftASTCommandArguments: refreshed,
-                            clangASTCommandArguments: nil,
-                            clangPCHCommandArguments: nil
-                        )
-                    ]
+                    true: [:],
+                    false: [
+                        "App": [
+                            filePath: XcodeBuild.FileSettings(
+                                swiftASTCommandArguments: refreshed,
+                                clangASTCommandArguments: nil,
+                                clangPCHCommandArguments: nil
+                            )
+                        ]
+                    ],
                 ]
             ]
         )
-        let db = InMemoryArgumentsStore()
-        await db.seed(filePath: filePath, scheme: "App", arguments: cached)
+        let graph = BuildGraphService(
+            xcodebuild: xcodebuild,
+            logger: makeTestLogger(),
+            configProvider: StaticConfigProvider(config: makeTextDocumentConfig())
+        )
 
         let handler = TextDocumentSourceKitOptions(
-            xcodebuild: xcodebuild,
-            db: db,
+            graph: graph,
+            state: BuildSystemState(),
             logger: makeTestLogger()
         )
 
@@ -132,4 +104,53 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
         XCTAssertEqual(result.compilerArguments, refreshed)
         XCTAssertTrue(xcodebuild.settingsForIndexCalls.contains(where: { $0.checkCache == false }))
     }
+
+    func testReturnsEmptyWhenFileIsUnknown() async throws {
+        let filePath = URL(filePath: "/tmp/Project/Unknown.swift").standardizedFileURL.path()
+
+        let xcodebuild = StubXcodeBuildClient(
+            listResult: XcodeBuild.List(
+                project: XcodeBuild.List.Project(name: "Project", schemes: [], targets: [])
+            ),
+            settingsForIndexByScheme: ["App": [:]]
+        )
+        let graph = BuildGraphService(
+            xcodebuild: xcodebuild,
+            logger: makeTestLogger(),
+            configProvider: StaticConfigProvider(config: makeTextDocumentConfig())
+        )
+
+        let handler = TextDocumentSourceKitOptions(
+            graph: graph,
+            state: BuildSystemState(),
+            logger: makeTestLogger()
+        )
+
+        let result = try await handler.handle(
+            request: Request(
+                id: "1",
+                method: handler.method,
+                params: TextDocumentSourceKitOptions.Params(
+                    language: "swift",
+                    textDocument: TextDocumentSourceKitOptions.Params.TextDocument(uri: "file://\(filePath)"),
+                    target: TargetID(uri: "xcode://Project?scheme=App")
+                )
+            ),
+            decoder: JSONDecoder()
+        )
+
+        XCTAssertTrue(result.compilerArguments.isEmpty)
+        XCTAssertNil(result.workingDirectory)
+    }
+}
+
+private func makeTextDocumentConfig() -> Config {
+    return Config(
+        name: "xcode-bsp",
+        argv: ["/usr/local/bin/xcode-bsp"],
+        version: "0.1.0",
+        bspVersion: "2.0.0",
+        languages: ["swift"],
+        activeSchemes: ["App"]
+    )
 }

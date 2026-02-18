@@ -29,15 +29,18 @@ final class StubXcodeBuildClient: @unchecked Sendable {
     var listResult: XcodeBuild.List
     var settingsForSchemeByScheme: [String: [XcodeBuild.Settings]]
     var settingsForIndexByScheme: [String: XcodeBuild.SettingsForIndex]
+    var settingsForIndexBySchemeAndCache: [String: [Bool: XcodeBuild.SettingsForIndex]]
 
     init(
         listResult: XcodeBuild.List,
         settingsForSchemeByScheme: [String: [XcodeBuild.Settings]] = [:],
-        settingsForIndexByScheme: [String: XcodeBuild.SettingsForIndex] = [:]
+        settingsForIndexByScheme: [String: XcodeBuild.SettingsForIndex] = [:],
+        settingsForIndexBySchemeAndCache: [String: [Bool: XcodeBuild.SettingsForIndex]] = [:]
     ) {
         self.listResult = listResult
         self.settingsForSchemeByScheme = settingsForSchemeByScheme
         self.settingsForIndexByScheme = settingsForIndexByScheme
+        self.settingsForIndexBySchemeAndCache = settingsForIndexBySchemeAndCache
         listCallCount = 0
         settingsForSchemeCalls = []
         settingsForIndexCalls = []
@@ -63,6 +66,9 @@ extension StubXcodeBuildClient: XcodeBuildClient {
         lock.lock()
         settingsForIndexCalls.append((scheme, checkCache))
         lock.unlock()
+        if let byCache = settingsForIndexBySchemeAndCache[scheme], let value = byCache[checkCache] {
+            return value
+        }
         return settingsForIndexByScheme[scheme] ?? [:]
     }
 }

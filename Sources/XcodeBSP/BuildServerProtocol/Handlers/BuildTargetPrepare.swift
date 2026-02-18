@@ -2,21 +2,24 @@ import Foundation
 import Logging
 
 struct BuildTargetPrepare {
-    let xcodebuild: any XcodeBuildClient
+    let graph: BuildGraphService
     let db: any ArgumentsStore
     let logger: Logger
     let state: BuildSystemState
 
+    private let projectName: String
+
     init(
-        xcodebuild: any XcodeBuildClient,
+        graph: BuildGraphService,
         db: any ArgumentsStore,
         logger: Logger,
         state: BuildSystemState
     ) {
-        self.xcodebuild = xcodebuild
+        self.graph = graph
         self.db = db
         self.logger = logger
         self.state = state
+        projectName = URL(filePath: FileManager.default.currentDirectoryPath).lastPathComponent
     }
 }
 
@@ -29,9 +32,41 @@ extension BuildTargetPrepare: MethodHandler {
 
     func handle(request: Request<Params>, decoder: JSONDecoder) async throws -> Result {
         await state.beginUpdate()
-        await prepareTargets(request.params.targets)
-        await state.endUpdate()
-        return Result()
+        do {
+            let refresh = try await graph.refresh(decoder: decoder, checkCache: true)
+            await state.recordRefreshChanges(refresh)
+
+            for target in request.params.targets {
+                guard let parsedTarget = parseTarget(fromURI: target.uri) else {
+                    logger.error("failed to extract scheme from target uri: \(target.uri)")
+                    continue
+                }
+
+                let lookupURI = canonicalTargetURI(scheme: parsedTarget.scheme, target: parsedTarget.target)
+                let optionsByFile = refresh.snapshot.optionsByTargetURI[target.uri] ?? refresh.snapshot.optionsByTargetURI[lookupURI] ?? [:]
+                if optionsByFile.isEmpty {
+                    logger.debug("buildTarget/prepare produced no compiler arguments for \(target.uri)")
+                    continue
+                }
+
+                let argsByFilePaths = optionsByFile.mapValues { $0.options }
+                do {
+                    try await db.updateArgs(
+                        argsByFilePaths: argsByFilePaths,
+                        scheme: cacheScope(scheme: parsedTarget.scheme, target: parsedTarget.target)
+                    )
+                    logger.debug("buildTarget/prepare cached compiler arguments for \(target.uri)")
+                } catch {
+                    logger.error("buildTarget/prepare failed for \(target.uri): \(error)")
+                }
+            }
+
+            await state.endUpdate()
+            return Result()
+        } catch {
+            await state.endUpdate()
+            throw error
+        }
     }
 }
 
@@ -39,44 +74,6 @@ extension BuildTargetPrepare {
     private struct PreparedTarget {
         let scheme: String
         let target: String?
-    }
-
-    private func prepareTargets(_ targets: [TargetID]) async {
-        for target in targets {
-            guard let preparedTarget = parseTarget(fromURI: target.uri) else {
-                logger.error("failed to extract scheme from target uri: \(target.uri)")
-                continue
-            }
-
-            do {
-                var argsByFilePaths = compilerArgumentsByFilePath(
-                    forScheme: preparedTarget.scheme,
-                    target: preparedTarget.target,
-                    checkCache: true
-                )
-                if argsByFilePaths.isEmpty {
-                    argsByFilePaths = compilerArgumentsByFilePath(
-                        forScheme: preparedTarget.scheme,
-                        target: preparedTarget.target,
-                        checkCache: false
-                    )
-                }
-
-                if argsByFilePaths.isEmpty {
-                    logger.debug("buildTarget/prepare produced no compiler arguments for \(target.uri)")
-                    continue
-                }
-
-                let sanitizedArgsByFilePath = sanitizeMissingSDK(argumentsByFilePath: argsByFilePaths)
-                try await db.updateArgs(
-                    argsByFilePaths: sanitizedArgsByFilePath,
-                    scheme: cacheScope(scheme: preparedTarget.scheme, target: preparedTarget.target)
-                )
-                logger.debug("buildTarget/prepare cached compiler arguments for \(target.uri)")
-            } catch {
-                logger.error("buildTarget/prepare failed for \(target.uri): \(error)")
-            }
-        }
     }
 
     private func parseTarget(fromURI uri: String) -> PreparedTarget? {
@@ -92,107 +89,27 @@ extension BuildTargetPrepare {
         return PreparedTarget(scheme: scheme, target: target)
     }
 
-    private func compilerArgumentsByFilePath(
-        forScheme scheme: String,
-        target: String?,
-        checkCache: Bool
-    ) -> [String: [String]] {
-        var argsByFilePaths: [String: [String]] = [:]
-        let settingsForIndex = try? xcodebuild.settingsForIndex(forScheme: scheme, checkCache: checkCache)
-        let fileSettingsByPath = fileSettingsByPath(
-            from: settingsForIndex ?? [:],
-            scheme: scheme,
-            target: target
-        )
-
-        for (path, value) in fileSettingsByPath {
-            let normalizedPath = normalizeFilePath(path)
-            var arguments = value.swiftASTCommandArguments ?? []
-            arguments.append(contentsOf: value.clangASTCommandArguments ?? [])
-            arguments.append(contentsOf: value.clangPCHCommandArguments ?? [])
-
-            arguments = arguments.filter { $0 != "-use-frontend-parseable-output" }
-            for (i, arg) in arguments.enumerated().reversed() {
-                if arg == "-emit-localized-strings-path", i > 0 {
-                    arguments.remove(at: i)
-                    arguments.remove(at: i - 1)
-                } else if arg == "-emit-localized-strings" {
-                    arguments.remove(at: i)
-                }
-            }
-
-            argsByFilePaths[normalizedPath] = arguments
-        }
-
-        return argsByFilePaths
-    }
-
-    private func fileSettingsByPath(
-        from settingsForIndex: XcodeBuild.SettingsForIndex,
-        scheme: String,
-        target: String?
-    ) -> [String: XcodeBuild.FileSettings] {
-        var keyCandidates: [String] = []
-        if let target, target.isEmpty == false {
-            keyCandidates.append(target)
-        }
-        keyCandidates.append(scheme)
-
-        for key in keyCandidates {
-            if let exact = settingsForIndex[key], exact.isEmpty == false {
-                return exact
-            }
-        }
-
-        if settingsForIndex.count == 1, let single = settingsForIndex.values.first {
-            return single
-        }
-
-        var merged: [String: XcodeBuild.FileSettings] = [:]
-        for (_, value) in settingsForIndex {
-            for (filePath, fileSettings) in value {
-                merged[filePath] = fileSettings
-            }
-        }
-
-        return merged
-    }
-
-    private func sanitizeMissingSDK(argumentsByFilePath: [String: [String]]) -> [String: [String]] {
-        var result: [String: [String]] = [:]
-        for (filePath, arguments) in argumentsByFilePath {
-            result[filePath] = removeMissingSDK(arguments: arguments)
-        }
-        return result
-    }
-
-    private func removeMissingSDK(arguments: [String]) -> [String] {
-        var sanitizedArguments = arguments
-        for (i, arg) in arguments.enumerated().reversed() {
-            guard arg == "-sdk", i + 1 < arguments.count else {
-                continue
-            }
-
-            let path = arguments[i + 1]
-            if FileManager.default.fileExists(atPath: path) == false {
-                sanitizedArguments.remove(at: i + 1)
-                sanitizedArguments.remove(at: i)
-            }
-        }
-
-        return sanitizedArguments
-    }
-
-    private func normalizeFilePath(_ path: String) -> String {
-        return URL(filePath: path).standardizedFileURL.path()
-    }
-
     private func cacheScope(scheme: String, target: String?) -> String {
         guard let target, target.isEmpty == false else {
             return scheme
         }
 
         return "\(scheme)::\(target)"
+    }
+
+    private func canonicalTargetURI(scheme: String, target: String?) -> String {
+        var components = URLComponents()
+        components.scheme = "xcode"
+        components.host = projectName
+
+        var queryItems = [URLQueryItem(name: "scheme", value: scheme)]
+        if let target, target.isEmpty == false {
+            queryItems.append(URLQueryItem(name: "target", value: target))
+        }
+        components.queryItems = queryItems
+
+        let fallbackTarget = target.map { "&target=\($0)" } ?? ""
+        return components.string ?? "xcode://\(projectName)?scheme=\(scheme)\(fallbackTarget)"
     }
 }
 
