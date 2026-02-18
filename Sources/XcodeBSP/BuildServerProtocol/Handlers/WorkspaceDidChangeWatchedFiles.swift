@@ -19,9 +19,15 @@ extension WorkspaceDidChangeWatchedFiles: NotificationMethodHandler {
     }
 
     func handle(notification: Notification<Params>, decoder: JSONDecoder) async throws {
+        let changes = notification.params?.changes ?? []
+        guard Self.hasRelevantChanges(changes) else {
+            logger.debug("workspace/didChangeWatchedFiles ignored \(changes.count) non-source changes")
+            return
+        }
+
         await state.beginUpdate()
         do {
-            let changedFilesCount = notification.params?.changes.count ?? 0
+            let changedFilesCount = changes.count
             logger.trace("workspace/didChangeWatchedFiles with \(changedFilesCount) changes")
 
             await graph.invalidate()
@@ -33,6 +39,55 @@ extension WorkspaceDidChangeWatchedFiles: NotificationMethodHandler {
             throw error
         }
     }
+}
+
+extension WorkspaceDidChangeWatchedFiles {
+    static func hasRelevantChanges(_ changes: [Params.ChangedFile]) -> Bool {
+        return changes.contains { isRelevant(change: $0) }
+    }
+
+    private static func isRelevant(change: Params.ChangedFile) -> Bool {
+        guard let url = URL(string: change.uri), url.isFileURL else {
+            return true
+        }
+
+        let path = url.standardizedFileURL.path().lowercased()
+        if path.contains("/.build/") || path.contains("/deriveddata/") || path.contains("/modulecache/") || path.contains("/index.noindex/") {
+            return false
+        }
+
+        let fileExtension = URL(filePath: path).pathExtension
+        if fileExtension.isEmpty {
+            return true
+        }
+
+        return relevantExtensions.contains(fileExtension)
+    }
+
+    private static let relevantExtensions: Set<String> = [
+        "swift",
+        "h",
+        "hh",
+        "hpp",
+        "m",
+        "mm",
+        "c",
+        "cc",
+        "cpp",
+        "cxx",
+        "pch",
+        "modulemap",
+        "metal",
+        "swiftinterface",
+        "swiftmodule",
+        "swiftpm",
+        "xcodeproj",
+        "pbxproj",
+        "xcscheme",
+        "xcconfig",
+        "plist",
+        "resolved",
+    ]
 }
 
 extension WorkspaceDidChangeWatchedFiles {

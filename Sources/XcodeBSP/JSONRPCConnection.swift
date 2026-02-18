@@ -1,7 +1,7 @@
 import Foundation
 import Logging
 
-final class JSONRPCConnection: Sendable {
+final class JSONRPCConnection: @unchecked Sendable {
     private let queue: DispatchQueue
     private let source: DispatchSourceRead
     private let stdin: FileHandle
@@ -11,6 +11,9 @@ final class JSONRPCConnection: Sendable {
     private let encoder: JSONEncoder
 
     private let separator: Data
+    private let contentLengthHeader = "content-length:"
+    private var inputBuffer: Data
+    private let sendLock: NSLock
 
     private let logger: Logger
 
@@ -23,6 +26,8 @@ final class JSONRPCConnection: Sendable {
         decoder = JSONDecoder()
         encoder = JSONEncoder()
         separator = "\r\n\r\n".data(using: .utf8)!
+        inputBuffer = Data()
+        sendLock = NSLock()
     }
 }
 
@@ -64,9 +69,15 @@ extension JSONRPCConnection {
             }
 
             do {
-                let (msg, body) = try self.receiveMessage()
+                let messages = try self.receiveMessages()
+                guard messages.isEmpty == false else {
+                    return
+                }
+
                 Task<Void, Never> {
-                    await messageHandler(msg, body)
+                    for (msg, body) in messages {
+                        await messageHandler(msg, body)
+                    }
                 }
             } catch is NothingToReadError {
                 // skip
@@ -77,29 +88,78 @@ extension JSONRPCConnection {
         source.resume()
     }
 
-    private func receiveMessage() throws -> (message: Message, body: Data) {
+    private func receiveMessages() throws -> [(message: Message, body: Data)] {
         let data = stdin.availableData
         guard data.isEmpty == false else {
             throw NothingToReadError()
         }
 
-        let parts = data.split(separator: separator)
-        guard parts.count == 2 else {
-            throw InvalidMessageError(reason: .failedToSplit(separator: separator), data: data)
+        inputBuffer.append(data)
+
+        var result: [(message: Message, body: Data)] = []
+        while let body = try readSingleMessageBody() {
+            do {
+                let msg = try decoder.decode(Message.self, from: body)
+                result.append((msg, body))
+            } catch let error as DecodingError {
+                throw InvalidMessageError(reason: .failedToDecode(decodingError: error), data: body)
+            }
         }
 
-        let body = parts[1]
-        do {
-            let msg = try decoder.decode(Message.self, from: body)
-            return (msg, body)
-        } catch let error as DecodingError {
-            throw InvalidMessageError(reason: .failedToDecode(decodingError: error), data: data)
+        return result
+    }
+
+    private func readSingleMessageBody() throws -> Data? {
+        guard let separatorRange = inputBuffer.range(of: separator) else {
+            return nil
         }
+
+        let headerData = Data(inputBuffer[inputBuffer.startIndex..<separatorRange.lowerBound])
+        let contentLength = try parseContentLength(header: headerData)
+
+        let bodyStartOffset = inputBuffer.distance(from: inputBuffer.startIndex, to: separatorRange.upperBound)
+        let messageEndOffset = bodyStartOffset + contentLength
+        guard inputBuffer.count >= messageEndOffset else {
+            return nil
+        }
+
+        let messageEnd = inputBuffer.index(inputBuffer.startIndex, offsetBy: messageEndOffset)
+        let body = Data(inputBuffer[separatorRange.upperBound..<messageEnd])
+
+        inputBuffer.removeSubrange(inputBuffer.startIndex..<messageEnd)
+        return body
+    }
+
+    private func parseContentLength(header: Data) throws -> Int {
+        guard let headerString = String(data: header, encoding: .utf8) else {
+            throw InvalidMessageError(reason: .failedToDecodeHeader, data: header)
+        }
+
+        let lines = headerString.components(separatedBy: "\r\n")
+        for line in lines {
+            let lowercased = line.lowercased()
+            guard lowercased.hasPrefix(contentLengthHeader) else {
+                continue
+            }
+
+            let value = line.dropFirst(contentLengthHeader.count).trimmingCharacters(in: .whitespaces)
+            guard let length = Int(value), length >= 0 else {
+                throw InvalidMessageError(reason: .failedToReadContentLength, data: header)
+            }
+
+            return length
+        }
+
+        throw InvalidMessageError(reason: .failedToReadContentLength, data: header)
     }
 
     func send(message: some Encodable) throws {
         let data = try encoder.encode(message)
         let header = "Content-Length: \(data.count)".data(using: .utf8)!
+        sendLock.lock()
+        defer {
+            sendLock.unlock()
+        }
         stdout.write(header + separator + data)
     }
 }
@@ -116,22 +176,30 @@ extension JSONRPCConnection {
 
 extension JSONRPCConnection.InvalidMessageError {
     enum Reason {
-        case failedToSplit(separator: Data)
+        case failedToDecodeHeader
+        case failedToReadContentLength
         case failedToDecode(decodingError: DecodingError)
     }
 }
 
 extension JSONRPCConnection.InvalidMessageError: CustomStringConvertible {
     var description: String {
-        return "Invalid message (reason=\(reason)): \(String(data: data, encoding: .utf8) ?? "")"
+        let previewLimit = 2048
+        let text = String(data: data, encoding: .utf8) ?? ""
+        let preview = text.count > previewLimit
+            ? "\(text.prefix(previewLimit))...(truncated \(text.count - previewLimit) chars)"
+            : text
+        return "Invalid message (reason=\(reason)): \(preview)"
     }
 }
 
 extension JSONRPCConnection.InvalidMessageError.Reason: CustomStringConvertible {
     var description: String {
         switch self {
-        case let .failedToSplit(separator):
-            return "failed to split with separator \(String(data: separator, encoding: .utf8) ?? "")"
+        case .failedToDecodeHeader:
+            return "failed to decode message headers"
+        case .failedToReadContentLength:
+            return "failed to read Content-Length header"
         case let .failedToDecode(decoderError):
             return "failed to decode error \(decoderError)"
         }

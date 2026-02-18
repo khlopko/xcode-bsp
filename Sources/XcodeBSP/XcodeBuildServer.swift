@@ -10,7 +10,9 @@ final class XcodeBuildServer: Sendable {
 
     init(cacheDir: URL) throws {
         decoder = JSONDecoder()
-        logger = try makeLogger(label: "xcode-bsp")
+        var logger = try makeLogger(label: "xcode-bsp")
+        logger.logLevel = .error
+        self.logger = logger
         conn = JSONRPCConnection(logger: logger)
         state = BuildSystemState()
 

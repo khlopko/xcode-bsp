@@ -48,6 +48,7 @@ actor BuildGraphService {
 
     func snapshot(decoder: JSONDecoder) async throws -> BuildGraphSnapshot {
         if let snapshotCache {
+            logger.trace("build graph snapshot cache hit\n\(snapshotCache.logDescription)")
             return snapshotCache
         }
 
@@ -157,6 +158,14 @@ actor BuildGraphService {
         let changedTargetURIs = changedTargetURIs(previous: previous, current: snapshot)
         let changedOptionsByFilePath = changedOptionsByFilePath(previous: previous, current: snapshot)
 
+        logger.trace(
+            """
+            build graph snapshot refreshed \
+            (changedTargets: \(changedTargetURIs.count), changedFiles: \(changedOptionsByFilePath.count))
+            \(snapshot.logDescription)
+            """
+        )
+
         return BuildGraphRefreshResult(
             snapshot: snapshot,
             changedTargetURIs: changedTargetURIs,
@@ -176,20 +185,24 @@ extension BuildGraphService {
         }
 
         do {
+            logger.trace("invoking xcodebuild.list(checkCache: \(checkCache))")
             return try xcodebuild.list(checkCache: checkCache).project.schemes
         } catch {
             guard checkCache else {
                 throw error
             }
 
+            logger.trace("invoking xcodebuild.list(checkCache: false) after failure with cached result")
             return try xcodebuild.list(checkCache: false).project.schemes
         }
     }
 
     private func settingsForIndex(forScheme scheme: String, checkCache: Bool) throws -> XcodeBuild.SettingsForIndex {
         do {
+            logger.trace("invoking xcodebuild.settingsForIndex(forScheme: \(scheme), checkCache: \(checkCache))")
             let settings = try xcodebuild.settingsForIndex(forScheme: scheme, checkCache: checkCache)
             if settings.isEmpty, checkCache {
+                logger.trace("invoking xcodebuild.settingsForIndex(forScheme: \(scheme), checkCache: false) because cached settings are empty")
                 return try xcodebuild.settingsForIndex(forScheme: scheme, checkCache: false)
             }
             return settings
@@ -198,6 +211,7 @@ extension BuildGraphService {
                 throw error
             }
 
+            logger.trace("invoking xcodebuild.settingsForIndex(forScheme: \(scheme), checkCache: false) after failure with cached result")
             return try xcodebuild.settingsForIndex(forScheme: scheme, checkCache: false)
         }
     }
@@ -341,6 +355,7 @@ extension BuildGraphService {
         }
 
         for scheme in schemes {
+            logger.trace("invoking xcodebuild.settingsForScheme(\(scheme), checkCache: \(checkCache))")
             guard let settings = try? xcodebuild.settingsForScheme(scheme, checkCache: checkCache) else {
                 continue
             }
@@ -355,7 +370,7 @@ extension BuildGraphService {
                 .appending(components: "Index.noindex", "DataStore")
                 .standardizedFileURL
                 .path()
-            logger.debug("using fallback index store path from BUILD_ROOT for scheme \(scheme): \(heuristic)")
+            logger.trace("using fallback index store path from BUILD_ROOT for scheme \(scheme): \(heuristic)")
             return heuristic
         }
 
@@ -444,6 +459,22 @@ extension BuildGraphService {
 }
 
 extension BuildGraphSnapshot {
+    var logDescription: String {
+        var lines: [String] = []
+        lines.append("snapshot:")
+        lines.append("  indexStorePath: \(indexStorePath ?? "nil")")
+
+        lines.append("  targets[\(targets.count)]:")
+        for target in targets.sorted(by: { $0.uri < $1.uri }) {
+            let dependencies = target.dependencies.sorted().joined(separator: ", ")
+            lines.append("    - uri: \(target.uri)")
+            lines.append("      displayName: \(target.displayName)")
+            lines.append("      dependencies: [\(dependencies)]")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     func options(forFilePath filePath: String, targetURI: String?) -> CompilerOptions? {
         let normalizedFilePath = URL(filePath: filePath).standardizedFileURL.path()
         let resolvedFilePath = URL(filePath: normalizedFilePath).resolvingSymlinksInPath().path()
