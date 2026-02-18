@@ -64,7 +64,7 @@ extension BuildInitialize {
 extension BuildInitialize {
     struct Result: Encodable {
         let displayName: String = "xcode-bsp"
-        let version: String = "0.1.0"
+        let version: String = "0.2.0"
         let bspVersion: String = "2.0.0"
         let capabilities: Capabilities
         let dataKind: String = "sourceKit"

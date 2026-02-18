@@ -7,7 +7,7 @@ final class BuildInitializeTests: XCTestCase {
         let config = Config(
             name: "xcode-bsp",
             argv: ["/usr/local/bin/xcode-bsp"],
-            version: "0.1.0",
+            version: "0.2.0",
             bspVersion: "2.0.0",
             languages: ["swift"],
             activeSchemes: ["App"]
@@ -69,7 +69,7 @@ final class BuildInitializeTests: XCTestCase {
         let config = Config(
             name: "xcode-bsp",
             argv: ["/usr/local/bin/xcode-bsp"],
-            version: "0.1.0",
+            version: "0.2.0",
             bspVersion: "2.0.0",
             languages: ["swift"],
             activeSchemes: ["App"]
