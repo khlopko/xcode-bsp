@@ -1,19 +1,14 @@
 > [!WARNING]
-> Alpha software (v0.2.x). Ready for early adopters, but not yet stable.
+> Alpha software (v0.3.0). It might not be stable yet.
 
 ![hero](hero.png)
 
 # xcode-bsp
 Xcode Build Server Protocol implementation in Swift.
 
-Aims to provide support for Xcode projects in editors that rely on [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp).
+[![Build](https://github.com/khlopko/xcode-bsp/actions/workflows/ci.yml/badge.svg)](https://github.com/khlopko/xcode-bsp/actions/workflows/ci.yml)
 
-## status
-- Stage: **Alpha / Early Access** (`0.2.x`).
-- Readiness: usable for early adopters and daily experimentation.
-- Not yet implemented: diagnostics support.
-- Expected behavior: first requests can be slower while caches are populated.
-- Platform requirement: `macOS 14+` (`Package.swift`).
+Aims to provide support for Xcode projects in editors that rely on [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp).
 
 ## implemented protocol surface
 Incoming requests:
@@ -67,7 +62,7 @@ Manual config is still supported. Example `.bsp/xcode-bsp.json`:
 {
   "name": "xcode-bsp",
   "argv": ["/absolute/path/to/xcode-bsp"],
-  "version": "0.2.0",
+  "version": "0.3.0",
   "bspVersion": "2.0.0",
   "languages": ["swift", "objective-c", "objective-cpp"],
   "activeSchemes": []
