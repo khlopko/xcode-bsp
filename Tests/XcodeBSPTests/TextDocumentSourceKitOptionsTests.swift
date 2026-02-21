@@ -5,7 +5,7 @@ import XCTest
 final class TextDocumentSourceKitOptionsTests: XCTestCase {
     func testReturnsArgumentsAndWorkingDirectoryFromGraph() async throws {
         let filePath = URL(filePath: "/tmp/Project/File.swift").standardizedFileURL.path()
-        let expected = ["swiftc", "-working-directory", "/tmp/Project"]
+        let expected = ["-working-directory", "/tmp/Project"]
 
         let xcodebuild = StubXcodeBuildClient(
             listResult: XcodeBuild.List(
@@ -15,7 +15,7 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
                 "App": [
                     "App": [
                         filePath: XcodeBuild.FileSettings(
-                            swiftASTCommandArguments: expected,
+                            swiftASTCommandArguments: ["swiftc"] + expected,
                             clangASTCommandArguments: nil,
                             clangPCHCommandArguments: nil
                         )
@@ -28,11 +28,12 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
             logger: makeTestLogger(),
             configProvider: StaticConfigProvider(config: makeTextDocumentConfig())
         )
+        let refreshTrigger = CountingRefreshTrigger()
 
         let handler = TextDocumentSourceKitOptions(
             graph: graph,
-            state: BuildSystemState(),
-            logger: makeTestLogger()
+            logger: makeTestLogger(),
+            refreshTrigger: refreshTrigger
         )
 
         let result = try await handler.handle(
@@ -53,9 +54,9 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
         XCTAssertEqual(xcodebuild.settingsForIndexCalls.first?.checkCache, true)
     }
 
-    func testCacheMissRefreshesWithBypassCacheLookup() async throws {
+    func testCacheMissSchedulesBackgroundRefreshAndReturnsEmpty() async throws {
         let filePath = URL(filePath: "/tmp/Project/File.swift").standardizedFileURL.path()
-        let refreshed = ["swiftc", "-working-directory", "/tmp/Project"]
+        let refreshTrigger = CountingRefreshTrigger()
 
         let xcodebuild = StubXcodeBuildClient(
             listResult: XcodeBuild.List(
@@ -64,15 +65,7 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
             settingsForIndexBySchemeAndCache: [
                 "App": [
                     true: [:],
-                    false: [
-                        "App": [
-                            filePath: XcodeBuild.FileSettings(
-                                swiftASTCommandArguments: refreshed,
-                                clangASTCommandArguments: nil,
-                                clangPCHCommandArguments: nil
-                            )
-                        ]
-                    ],
+                    false: [:],
                 ]
             ]
         )
@@ -84,8 +77,8 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
 
         let handler = TextDocumentSourceKitOptions(
             graph: graph,
-            state: BuildSystemState(),
-            logger: makeTestLogger()
+            logger: makeTestLogger(),
+            refreshTrigger: refreshTrigger
         )
 
         let result = try await handler.handle(
@@ -101,8 +94,11 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
             decoder: JSONDecoder()
         )
 
-        XCTAssertEqual(result.compilerArguments, refreshed)
-        XCTAssertTrue(xcodebuild.settingsForIndexCalls.contains(where: { $0.checkCache == false }))
+        XCTAssertEqual(result.compilerArguments, [])
+        XCTAssertEqual(result.workingDirectory, nil)
+        let reasons = await refreshTrigger.reasonsSnapshot()
+        XCTAssertEqual(reasons.count, 1)
+        XCTAssertTrue(reasons[0].contains("sourceKitOptions-miss"))
     }
 
     func testReturnsEmptyWhenFileIsUnknown() async throws {
@@ -119,11 +115,12 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
             logger: makeTestLogger(),
             configProvider: StaticConfigProvider(config: makeTextDocumentConfig())
         )
+        let refreshTrigger = CountingRefreshTrigger()
 
         let handler = TextDocumentSourceKitOptions(
             graph: graph,
-            state: BuildSystemState(),
-            logger: makeTestLogger()
+            logger: makeTestLogger(),
+            refreshTrigger: refreshTrigger
         )
 
         let result = try await handler.handle(
@@ -141,6 +138,162 @@ final class TextDocumentSourceKitOptionsTests: XCTestCase {
 
         XCTAssertTrue(result.compilerArguments.isEmpty)
         XCTAssertNil(result.workingDirectory)
+        let reasons = await refreshTrigger.reasonsSnapshot()
+        XCTAssertEqual(reasons.count, 1)
+    }
+
+    func testAcceptsMissingLanguageField() async throws {
+        let filePath = URL(filePath: "/tmp/Project/File.swift").standardizedFileURL.path()
+
+        let xcodebuild = StubXcodeBuildClient(
+            listResult: XcodeBuild.List(
+                project: XcodeBuild.List.Project(name: "Project", schemes: [], targets: [])
+            ),
+            settingsForIndexByScheme: [
+                "App": [
+                    "App": [
+                        filePath: XcodeBuild.FileSettings(
+                            swiftASTCommandArguments: ["swiftc", "-working-directory", "/tmp/Project"],
+                            clangASTCommandArguments: nil,
+                            clangPCHCommandArguments: nil
+                        )
+                    ]
+                ]
+            ]
+        )
+        let graph = BuildGraphService(
+            xcodebuild: xcodebuild,
+            logger: makeTestLogger(),
+            configProvider: StaticConfigProvider(config: makeTextDocumentConfig())
+        )
+        let refreshTrigger = CountingRefreshTrigger()
+        let handler = TextDocumentSourceKitOptions(
+            graph: graph,
+            logger: makeTestLogger(),
+            refreshTrigger: refreshTrigger
+        )
+
+        let request = Request(
+            id: "1",
+            method: handler.method,
+            params: TextDocumentSourceKitOptions.Params(
+                language: nil,
+                textDocument: TextDocumentSourceKitOptions.Params.TextDocument(uri: "file://\(filePath)"),
+                target: TargetID(uri: "xcode://Project?scheme=App")
+            )
+        )
+
+        let result = try await handler.handle(request: request, decoder: JSONDecoder())
+        XCTAssertEqual(result.compilerArguments, ["-working-directory", "/tmp/Project"])
+        let reasons = await refreshTrigger.reasonsSnapshot()
+        XCTAssertEqual(reasons.count, 0)
+    }
+
+    func testStripsXcrunCompilerPrefixFromClangArguments() async throws {
+        let filePath = URL(filePath: "/tmp/Project/File.mm").standardizedFileURL.path()
+
+        let xcodebuild = StubXcodeBuildClient(
+            listResult: XcodeBuild.List(
+                project: XcodeBuild.List.Project(name: "Project", schemes: [], targets: [])
+            ),
+            settingsForIndexByScheme: [
+                "App": [
+                    "App": [
+                        filePath: XcodeBuild.FileSettings(
+                            swiftASTCommandArguments: nil,
+                            clangASTCommandArguments: ["xcrun", "clang", "-x", "objective-c++", filePath],
+                            clangPCHCommandArguments: nil
+                        )
+                    ]
+                ]
+            ]
+        )
+        let graph = BuildGraphService(
+            xcodebuild: xcodebuild,
+            logger: makeTestLogger(),
+            configProvider: StaticConfigProvider(config: makeTextDocumentConfig())
+        )
+        let refreshTrigger = CountingRefreshTrigger()
+        let handler = TextDocumentSourceKitOptions(
+            graph: graph,
+            logger: makeTestLogger(),
+            refreshTrigger: refreshTrigger
+        )
+
+        let result = try await handler.handle(
+            request: Request(
+                id: "1",
+                method: handler.method,
+                params: TextDocumentSourceKitOptions.Params(
+                    language: "objective-cpp",
+                    textDocument: TextDocumentSourceKitOptions.Params.TextDocument(uri: "file://\(filePath)"),
+                    target: TargetID(uri: "xcode://Project?scheme=App")
+                )
+            ),
+            decoder: JSONDecoder()
+        )
+
+        XCTAssertEqual(result.compilerArguments, ["-x", "objective-c++", filePath])
+        let reasons = await refreshTrigger.reasonsSnapshot()
+        XCTAssertEqual(reasons.count, 0)
+    }
+
+    func testSchedulesRefreshWhenCachedArgsContainMissingModuleMap() async throws {
+        let filePath = URL(filePath: "/tmp/Project/File.m").standardizedFileURL.path()
+        let missingModuleMapPath = "/tmp/Project/Derived/Generated.modulemap"
+
+        let xcodebuild = StubXcodeBuildClient(
+            listResult: XcodeBuild.List(
+                project: XcodeBuild.List.Project(name: "Project", schemes: [], targets: [])
+            ),
+            settingsForIndexByScheme: [
+                "App": [
+                    "App": [
+                        filePath: XcodeBuild.FileSettings(
+                            swiftASTCommandArguments: nil,
+                            clangASTCommandArguments: [
+                                "clang",
+                                "-fmodule-map-file=\(missingModuleMapPath)",
+                                "-x",
+                                "objective-c",
+                                filePath,
+                            ],
+                            clangPCHCommandArguments: nil
+                        )
+                    ]
+                ]
+            ]
+        )
+        let graph = BuildGraphService(
+            xcodebuild: xcodebuild,
+            logger: makeTestLogger(),
+            configProvider: StaticConfigProvider(config: makeTextDocumentConfig())
+        )
+        let refreshTrigger = CountingRefreshTrigger()
+        let handler = TextDocumentSourceKitOptions(
+            graph: graph,
+            logger: makeTestLogger(),
+            refreshTrigger: refreshTrigger
+        )
+
+        let result = try await handler.handle(
+            request: Request(
+                id: "1",
+                method: handler.method,
+                params: TextDocumentSourceKitOptions.Params(
+                    language: "objective-c",
+                    textDocument: TextDocumentSourceKitOptions.Params.TextDocument(uri: "file://\(filePath)"),
+                    target: TargetID(uri: "xcode://Project?scheme=App")
+                )
+            ),
+            decoder: JSONDecoder()
+        )
+
+        XCTAssertEqual(result.compilerArguments, [])
+        XCTAssertNil(result.workingDirectory)
+        let reasons = await refreshTrigger.reasonsSnapshot()
+        XCTAssertEqual(reasons.count, 1)
+        XCTAssertTrue(reasons[0].contains("sourceKitOptions-stale-paths"))
     }
 }
 

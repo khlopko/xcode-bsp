@@ -151,40 +151,38 @@ extension XcodeBuild {
 
 extension XcodeBuild {
     func settingsForIndex(forScheme scheme: String, checkCache: Bool = true) throws -> SettingsForIndex {
-        if checkCache, let data = withLock({ settingsForIndexMemoryCache[scheme] }) {
-            return try decoder.decode(SettingsForIndex.self, from: data)
-        }
-
         let cacheURL = settingsForIndexCacheURL(forScheme: scheme)
-        do {
-            let data = try exec(
-                command: "-showBuildSettingsForIndex -scheme \"\(scheme)\" 2>/dev/null",
-                cacheURL: cacheURL,
-                checkCache: checkCache
-            )
-            let settings = try decoder.decode(SettingsForIndex.self, from: data)
-            if checkCache {
-                withLock {
-                    settingsForIndexMemoryCache[scheme] = data
-                }
-            }
-            return settings
-        } catch {
-            guard checkCache else {
-                throw error
+
+        if checkCache {
+            if let data = withLock({ settingsForIndexMemoryCache[scheme] }) {
+                return (try? decoder.decode(SettingsForIndex.self, from: data)) ?? [:]
             }
 
-            let data = try exec(
-                command: "-showBuildSettingsForIndex -scheme \"\(scheme)\" 2>/dev/null",
-                cacheURL: cacheURL,
-                checkCache: false
-            )
-            let settings = try decoder.decode(SettingsForIndex.self, from: data)
-            withLock {
-                settingsForIndexMemoryCache[scheme] = data
+            guard
+                let cachedData = try? Data(contentsOf: cacheURL),
+                cachedData.isEmpty == false,
+                let decoded = try? decoder.decode(SettingsForIndex.self, from: cachedData)
+            else {
+                logger.trace("settingsForIndex cache miss for scheme \(scheme)")
+                return [:]
             }
-            return settings
+
+            withLock {
+                settingsForIndexMemoryCache[scheme] = cachedData
+            }
+            return decoded
         }
+
+        let data = try exec(
+            command: "-showBuildSettingsForIndex -scheme \"\(scheme)\" 2>/dev/null",
+            cacheURL: cacheURL,
+            checkCache: false
+        )
+        let settings = try decoder.decode(SettingsForIndex.self, from: data)
+        withLock {
+            settingsForIndexMemoryCache[scheme] = data
+        }
+        return settings
     }
 
     private func settingsForIndexCacheURL(forScheme scheme: String) -> URL {
@@ -243,5 +241,16 @@ extension XcodeBuild {
     private static func sha256Hex(for data: Data) -> String {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    func warmupBuild(forScheme scheme: String) throws {
+        let escapedScheme = scheme.replacingOccurrences(of: "\"", with: "\\\"")
+        _ = try? shell("xcodebuild -scheme \"\(escapedScheme)\" -resolvePackageDependencies >/dev/null 2>&1")
+        _ = try shell(
+            """
+            xcodebuild -scheme "\(escapedScheme)" build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO >/dev/null 2>&1
+            """
+        )
     }
 }

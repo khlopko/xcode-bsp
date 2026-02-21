@@ -3,13 +3,9 @@ import Logging
 
 struct WorkspaceDidChangeWatchedFiles {
     let logger: Logger
-    let state: BuildSystemState
-    let graph: BuildGraphService
 
-    init(logger: Logger, state: BuildSystemState, graph: BuildGraphService) {
+    init(logger: Logger) {
         self.logger = logger
-        self.state = state
-        self.graph = graph
     }
 }
 
@@ -19,25 +15,15 @@ extension WorkspaceDidChangeWatchedFiles: NotificationMethodHandler {
     }
 
     func handle(notification: Notification<Params>, decoder: JSONDecoder) async throws {
+        _ = decoder
         let changes = notification.params?.changes ?? []
         guard Self.hasRelevantChanges(changes) else {
-            logger.debug("workspace/didChangeWatchedFiles ignored \(changes.count) non-source changes")
+            logger.debug(
+                "workspace/didChangeWatchedFiles ignored \(changes.count) non-source changes")
             return
         }
 
-        await state.beginUpdate()
-        do {
-            let changedFilesCount = changes.count
-            logger.trace("workspace/didChangeWatchedFiles with \(changedFilesCount) changes")
-
-            await graph.invalidate()
-            let refresh = try await graph.refresh(decoder: decoder, checkCache: false)
-            await state.recordRefreshChanges(refresh)
-            await state.endUpdate()
-        } catch {
-            await state.endUpdate()
-            throw error
-        }
+        logger.trace("workspace/didChangeWatchedFiles ignored by design (\(changes.count) relevant changes)")
     }
 }
 
@@ -52,7 +38,9 @@ extension WorkspaceDidChangeWatchedFiles {
         }
 
         let path = url.standardizedFileURL.path().lowercased()
-        if path.contains("/.build/") || path.contains("/deriveddata/") || path.contains("/modulecache/") || path.contains("/index.noindex/") {
+        if path.contains("/.build/") || path.contains("/deriveddata/")
+            || path.contains("/modulecache/") || path.contains("/index.noindex/")
+        {
             return false
         }
 

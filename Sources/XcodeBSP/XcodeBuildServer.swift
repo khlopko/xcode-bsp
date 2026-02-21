@@ -7,6 +7,7 @@ final class XcodeBuildServer: Sendable {
     private let logger: Logger
     private let registry: HandlersRegistry
     private let state: BuildSystemState
+    private let notificationEmitter: PendingNotificationsEmitter
 
     init(cacheDir: URL) throws {
         decoder = JSONDecoder()
@@ -15,10 +16,31 @@ final class XcodeBuildServer: Sendable {
         self.logger = logger
         conn = JSONRPCConnection(logger: logger)
         state = BuildSystemState()
+        let enableLegacySourceKitOptionsChanged = Self.legacySourceKitOptionsChangedEnabled()
+        notificationEmitter = PendingNotificationsEmitter(
+            conn: conn,
+            state: state,
+            enableLegacySourceKitOptionsChanged: enableLegacySourceKitOptionsChanged
+        )
 
         let xcodebuild = XcodeBuild(cacheDir: cacheDir, decoder: decoder, logger: logger)
         let db = try Database(cacheDir: cacheDir)
         let graph = BuildGraphService(xcodebuild: xcodebuild, logger: logger)
+        let refreshCoordinator = BackgroundRefreshCoordinator(
+            logger: logger,
+            refreshAction: { [decoder, graph, state, notificationEmitter, logger] reason in
+                await state.beginUpdate()
+                do {
+                    let refresh = try await graph.refresh(decoder: decoder, checkCache: true)
+                    await state.recordRefreshChanges(refresh)
+                    await state.endUpdate()
+                    try await notificationEmitter.emit()
+                } catch {
+                    await state.endUpdate()
+                    logger.error("background refresh failed (reason=\(reason)): \(error)")
+                }
+            }
+        )
 
         registry = HandlersRegistry(
             requestHandlers: [
@@ -30,11 +52,11 @@ final class XcodeBuildServer: Sendable {
                 BuildTargetSources(graph: graph),
                 BuildTargetInverseSources(graph: graph),
                 WorkspaceWaitForBuildSystemUpdates(state: state),
-                TextDocumentSourceKitOptions(graph: graph, state: state, logger: logger),
+                TextDocumentSourceKitOptions(graph: graph, logger: logger, refreshTrigger: refreshCoordinator),
             ],
             notificationHandlers: [
                 BuildInitialized(),
-                WorkspaceDidChangeWatchedFiles(logger: logger, state: state, graph: graph),
+                WorkspaceDidChangeWatchedFiles(logger: logger),
                 BuildExit(state: state),
             ]
         )
@@ -58,7 +80,7 @@ extension XcodeBuildServer {
                     self.logger.debug("notification for \(msg.method) handled")
                 }
 
-                try await self.sendPendingNotifications()
+                try await self.notificationEmitter.emit()
             } catch let error as UnhandledMethodError {
                 switch error.kind {
                 case .request:
@@ -119,62 +141,6 @@ extension XcodeBuildServer {
         return .responseSent
     }
 
-    private func sendPendingNotifications() async throws {
-        let pending = await state.drainPendingChanges()
-
-        if pending.changedTargetURIs.isEmpty == false {
-            let changes = pending.changedTargetURIs.map {
-                BuildTargetDidChange(target: TargetID(uri: $0), kind: .changed)
-            }
-            try conn.send(
-                message: JSONRPCNotificationMessage(
-                    method: "buildTarget/didChange",
-                    params: BuildTargetDidChangeParams(changes: changes)
-                )
-            )
-        }
-
-        guard await state.hasRegisteredDocuments() else {
-            return
-        }
-
-        let registeredURIs = await state.registeredDocumentURIs()
-        for uri in registeredURIs {
-            guard let filePath = filePath(fromDocumentURI: uri) else {
-                continue
-            }
-
-            let resolved = URL(filePath: filePath).resolvingSymlinksInPath().path()
-            guard
-                let options = pending.changedOptionsByFilePath[filePath]
-                    ?? pending.changedOptionsByFilePath[resolved]
-            else {
-                continue
-            }
-
-            try conn.send(
-                message: JSONRPCNotificationMessage(
-                    method: "build/sourceKitOptionsChanged",
-                    params: BuildSourceKitOptionsChangedParams(
-                        uri: uri,
-                        updatedOptions: BuildSourceKitOptionsChangedParams.UpdatedOptions(
-                            options: options.options,
-                            workingDirectory: options.workingDirectory
-                        )
-                    )
-                )
-            )
-        }
-    }
-
-    private func filePath(fromDocumentURI documentURI: String) -> String? {
-        guard let url = URL(string: documentURI), url.isFileURL else {
-            return nil
-        }
-
-        return URL(filePath: url.path()).standardizedFileURL.path()
-    }
-
     private enum DispatchOutcome {
         case responseSent
         case notificationHandled
@@ -190,30 +156,42 @@ extension XcodeBuildServer {
         let data: Data
         let kind: MessageKind
     }
+
+    static func legacySourceKitOptionsChangedEnabled(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        let value = environment["XCODE_BSP_ENABLE_LEGACY_SOURCEKITOPTIONS_CHANGED"]?.lowercased()
+        switch value {
+        case "1", "true", "yes", "on":
+            return true
+        default:
+            return false
+        }
+    }
 }
 
-private struct JSONRPCErrorResponse: Encodable {
+struct JSONRPCErrorResponse: Encodable {
     let jsonrpc: String = "2.0"
-    let id: String?
+    let id: JSONRPCID?
     let error: JSONRPCErrorPayload
 }
 
-private struct JSONRPCErrorPayload: Encodable {
+struct JSONRPCErrorPayload: Encodable {
     let code: Int
     let message: String
 }
 
-private struct JSONRPCNotificationMessage<Params>: Encodable where Params: Encodable {
+struct JSONRPCNotificationMessage<Params>: Encodable where Params: Encodable {
     let jsonrpc: String = "2.0"
     let method: String
     let params: Params
 }
 
-private struct BuildTargetDidChangeParams: Encodable {
+struct BuildTargetDidChangeParams: Encodable {
     let changes: [BuildTargetDidChange]?
 }
 
-private struct BuildTargetDidChange: Encodable {
+struct BuildTargetDidChange: Encodable {
     let target: TargetID
     let kind: Kind
 
@@ -223,7 +201,7 @@ private struct BuildTargetDidChange: Encodable {
     }
 }
 
-private struct BuildSourceKitOptionsChangedParams: Encodable {
+struct BuildSourceKitOptionsChangedParams: Encodable {
     let uri: String
     let updatedOptions: UpdatedOptions
 }

@@ -34,6 +34,7 @@ actor BuildGraphService {
 
     private let projectName: String
     private var snapshotCache: BuildGraphSnapshot?
+    private var warmupTasksByScheme: [String: Task<Void, Error>]
 
     init(
         xcodebuild: any XcodeBuildClient,
@@ -44,6 +45,7 @@ actor BuildGraphService {
         self.logger = logger
         self.configProvider = configProvider
         projectName = URL(filePath: FileManager.default.currentDirectoryPath).lastPathComponent
+        warmupTasksByScheme = [:]
     }
 
     func snapshot(decoder: JSONDecoder) async throws -> BuildGraphSnapshot {
@@ -57,8 +59,34 @@ actor BuildGraphService {
     }
 
     func refresh(decoder: JSONDecoder, checkCache: Bool) async throws -> BuildGraphRefreshResult {
+        let refreshStart = Date()
+        var checkpointStart = refreshStart
+        var refreshSummary = "failed"
+
+        func durationMs(since start: Date) -> Int {
+            Int(Date().timeIntervalSince(start) * 1_000)
+        }
+
+        func logCheckpoint(_ name: String) {
+            let now = Date()
+            let stepMs = Int(now.timeIntervalSince(checkpointStart) * 1_000)
+            let totalMs = Int(now.timeIntervalSince(refreshStart) * 1_000)
+            logger.debug(
+                "build graph refresh checkpoint \(name) (stepMs: \(stepMs), totalMs: \(totalMs))"
+            )
+            checkpointStart = now
+        }
+
+        logger.debug("build graph refresh started (checkCache: \(checkCache))")
+        defer {
+            logger.debug(
+                "build graph refresh finished (status: \(refreshSummary), totalMs: \(durationMs(since: refreshStart)))"
+            )
+        }
+
         let config = try configProvider.load(decoder: decoder)
         let schemes = try resolveSchemes(config: config, checkCache: checkCache)
+        logCheckpoint("config+schemes (schemes: \(schemes.count))")
 
         var targets: [BuildGraphTarget] = []
         var filesByTargetURI: [String: [String]] = [:]
@@ -125,6 +153,7 @@ actor BuildGraphService {
                 }
             }
         }
+        logCheckpoint("build targets+options (targets: \(targets.count), filesByTarget: \(filesByTargetURI.count))")
 
         let targetsByFilePath = targetsByFile.mapValues { Array($0).sorted() }
 
@@ -136,12 +165,14 @@ actor BuildGraphService {
                 }
             }
         }
+        logCheckpoint("flatten options by file (files: \(optionsByFilePath.count))")
 
         let indexStorePath = preferredIndexStorePath(
             candidates: indexStoreCandidates,
             schemes: schemes,
             checkCache: checkCache
         )
+        logCheckpoint("resolve index store path")
 
         let snapshot = BuildGraphSnapshot(
             targets: targets.sorted(by: { $0.uri < $1.uri }),
@@ -157,6 +188,7 @@ actor BuildGraphService {
 
         let changedTargetURIs = changedTargetURIs(previous: previous, current: snapshot)
         let changedOptionsByFilePath = changedOptionsByFilePath(previous: previous, current: snapshot)
+        logCheckpoint("compute snapshot diff (changedTargets: \(changedTargetURIs.count), changedFiles: \(changedOptionsByFilePath.count))")
 
         logger.trace(
             """
@@ -165,6 +197,13 @@ actor BuildGraphService {
             \(snapshot.logDescription)
             """
         )
+
+        refreshSummary =
+            """
+            success, checkCache: \(checkCache), schemes: \(schemes.count), targets: \(snapshot.targets.count), \
+            filesByTarget: \(snapshot.filesByTargetURI.count), optionsByFile: \(snapshot.optionsByFilePath.count), \
+            changedTargets: \(changedTargetURIs.count), changedFiles: \(changedOptionsByFilePath.count)
+            """
 
         return BuildGraphRefreshResult(
             snapshot: snapshot,
@@ -175,6 +214,27 @@ actor BuildGraphService {
 
     func invalidate() {
         snapshotCache = nil
+    }
+
+    func warmupBuild(forScheme scheme: String) async throws {
+        if let task = warmupTasksByScheme[scheme] {
+            try await task.value
+            return
+        }
+
+        let task = Task<Void, Error> { [xcodebuild] in
+            try xcodebuild.warmupBuild(forScheme: scheme)
+        }
+        warmupTasksByScheme[scheme] = task
+
+        do {
+            try await task.value
+        } catch {
+            warmupTasksByScheme[scheme] = nil
+            throw error
+        }
+
+        warmupTasksByScheme[scheme] = nil
     }
 }
 
@@ -198,22 +258,8 @@ extension BuildGraphService {
     }
 
     private func settingsForIndex(forScheme scheme: String, checkCache: Bool) throws -> XcodeBuild.SettingsForIndex {
-        do {
-            logger.trace("invoking xcodebuild.settingsForIndex(forScheme: \(scheme), checkCache: \(checkCache))")
-            let settings = try xcodebuild.settingsForIndex(forScheme: scheme, checkCache: checkCache)
-            if settings.isEmpty, checkCache {
-                logger.trace("invoking xcodebuild.settingsForIndex(forScheme: \(scheme), checkCache: false) because cached settings are empty")
-                return try xcodebuild.settingsForIndex(forScheme: scheme, checkCache: false)
-            }
-            return settings
-        } catch {
-            guard checkCache else {
-                throw error
-            }
-
-            logger.trace("invoking xcodebuild.settingsForIndex(forScheme: \(scheme), checkCache: false) after failure with cached result")
-            return try xcodebuild.settingsForIndex(forScheme: scheme, checkCache: false)
-        }
+        logger.trace("invoking xcodebuild.settingsForIndex(forScheme: \(scheme), checkCache: \(checkCache))")
+        return try xcodebuild.settingsForIndex(forScheme: scheme, checkCache: checkCache)
     }
 
     private func makeTargetURI(scheme: String, target: String?) -> String {
@@ -283,9 +329,22 @@ extension BuildGraphService {
     }
 
     private func sanitizedCompilerArguments(from settings: XcodeBuild.FileSettings) -> [String] {
-        var arguments = settings.swiftASTCommandArguments ?? []
-        arguments.append(contentsOf: settings.clangASTCommandArguments ?? [])
-        arguments.append(contentsOf: settings.clangPCHCommandArguments ?? [])
+        var arguments = stripCompilerExecutable(
+            from: settings.swiftASTCommandArguments ?? [],
+            expectedCompilers: ["swiftc", "swift-frontend"]
+        )
+        arguments.append(
+            contentsOf: stripCompilerExecutable(
+                from: settings.clangASTCommandArguments ?? [],
+                expectedCompilers: ["clang", "clang++", "cc", "c++"]
+            )
+        )
+        arguments.append(
+            contentsOf: stripCompilerExecutable(
+                from: settings.clangPCHCommandArguments ?? [],
+                expectedCompilers: ["clang", "clang++", "cc", "c++"]
+            )
+        )
 
         arguments = arguments.filter { $0 != "-use-frontend-parseable-output" }
         for (index, argument) in arguments.enumerated().reversed() {
@@ -298,6 +357,33 @@ extension BuildGraphService {
         }
 
         return removeMissingSDK(arguments: arguments)
+    }
+
+    private func stripCompilerExecutable(from arguments: [String], expectedCompilers: [String]) -> [String] {
+        let commands = Set(expectedCompilers.map { $0.lowercased() })
+        guard arguments.isEmpty == false else {
+            return arguments
+        }
+
+        if arguments.count > 1, isCommand(arguments[0], oneOf: ["xcrun"]), isCommand(arguments[1], oneOf: commands) {
+            return Array(arguments.dropFirst(2))
+        }
+
+        if isCommand(arguments[0], oneOf: commands) {
+            return Array(arguments.dropFirst())
+        }
+
+        return arguments
+    }
+
+    private func isCommand(_ argument: String, oneOf commands: Set<String>) -> Bool {
+        let lowercased = argument.lowercased()
+        if commands.contains(lowercased) {
+            return true
+        }
+
+        let basename = URL(filePath: argument).lastPathComponent.lowercased()
+        return commands.contains(basename)
     }
 
     private func removeMissingSDK(arguments: [String]) -> [String] {
@@ -316,6 +402,7 @@ extension BuildGraphService {
 
         return sanitized
     }
+
 
     private func workingDirectory(arguments: [String]) -> String? {
         for (index, argument) in arguments.enumerated() {

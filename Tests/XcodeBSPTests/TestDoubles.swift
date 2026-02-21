@@ -25,6 +25,7 @@ final class StubXcodeBuildClient: @unchecked Sendable {
     private(set) var listCallCount: Int
     private(set) var settingsForSchemeCalls: [(scheme: String, checkCache: Bool)]
     private(set) var settingsForIndexCalls: [(scheme: String, checkCache: Bool)]
+    private(set) var warmupBuildCalls: [String]
 
     var listResult: XcodeBuild.List
     var settingsForSchemeByScheme: [String: [XcodeBuild.Settings]]
@@ -44,6 +45,7 @@ final class StubXcodeBuildClient: @unchecked Sendable {
         listCallCount = 0
         settingsForSchemeCalls = []
         settingsForIndexCalls = []
+        warmupBuildCalls = []
     }
 }
 
@@ -70,6 +72,12 @@ extension StubXcodeBuildClient: XcodeBuildClient {
             return value
         }
         return settingsForIndexByScheme[scheme] ?? [:]
+    }
+
+    func warmupBuild(forScheme scheme: String) throws {
+        lock.lock()
+        warmupBuildCalls.append(scheme)
+        lock.unlock()
     }
 }
 
@@ -103,4 +111,16 @@ actor InMemoryArgumentsStore: ArgumentsStore {
 
 func makeTestLogger() -> Logger {
     return Logger(label: "xcode-bsp.tests")
+}
+
+actor CountingRefreshTrigger: RefreshTrigger {
+    private(set) var reasons: [String] = []
+
+    func requestRefresh(reason: String) async {
+        reasons.append(reason)
+    }
+
+    func reasonsSnapshot() -> [String] {
+        return reasons
+    }
 }

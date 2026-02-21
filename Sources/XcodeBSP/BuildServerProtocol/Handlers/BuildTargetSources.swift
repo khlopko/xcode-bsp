@@ -17,35 +17,22 @@ extension BuildTargetSources: MethodHandler {
         let snapshot = try await graph.snapshot(decoder: decoder)
 
         var items: [Result.SourcesItem] = []
-        let sourceRootURI = URL(filePath: FileManager.default.currentDirectoryPath).appending(path: "/").absoluteString
 
         for target in request.params.targets {
             let sourcePaths = snapshot.filesByTargetURI[target.uri] ?? []
-
-            let sources: [Result.SourcesItem.SourceItem]
-            if sourcePaths.isEmpty {
-                sources = [
-                    Result.SourcesItem.SourceItem(
-                        uri: sourceRootURI,
-                        kind: .dir,
-                        generated: false
-                    )
-                ]
-            } else {
-                sources = sourcePaths.map { filePath in
-                    Result.SourcesItem.SourceItem(
-                        uri: URL(filePath: filePath).absoluteString,
-                        kind: .file,
-                        generated: false
-                    )
-                }
+            let sources = sourcePaths.map { filePath in
+                Result.SourcesItem.SourceItem(
+                    uri: URL(filePath: filePath).absoluteString,
+                    kind: .file,
+                    generated: false
+                )
             }
 
             items.append(
                 Result.SourcesItem(
                     target: TargetID(uri: target.uri),
                     sources: sources,
-                    roots: [sourceRootURI]
+                    roots: roots(from: sourcePaths)
                 )
             )
         }
@@ -86,5 +73,18 @@ extension BuildTargetSources.Result.SourcesItem.SourceItem {
     enum Kind: Int, Encodable {
         case file = 1
         case dir = 2
+    }
+}
+
+extension BuildTargetSources {
+    private func roots(from sourcePaths: [String]) -> [String] {
+        guard sourcePaths.isEmpty == false else {
+            return []
+        }
+
+        let directories = Set(sourcePaths.map { URL(filePath: $0).deletingLastPathComponent().path() })
+        return directories
+            .sorted()
+            .map { URL(filePath: $0).appending(path: "/").absoluteString }
     }
 }

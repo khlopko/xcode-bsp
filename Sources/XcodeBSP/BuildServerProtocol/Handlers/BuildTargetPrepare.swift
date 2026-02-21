@@ -33,17 +33,43 @@ extension BuildTargetPrepare: MethodHandler {
     func handle(request: Request<Params>, decoder: JSONDecoder) async throws -> Result {
         await state.beginUpdate()
         do {
-            let refresh = try await graph.refresh(decoder: decoder, checkCache: true)
-            await state.recordRefreshChanges(refresh)
+            let initialRefresh = try await graph.refresh(decoder: decoder, checkCache: true)
+            await state.recordRefreshChanges(initialRefresh)
 
-            for target in request.params.targets {
+            let preparedTargets = request.params.targets.compactMap { target -> (TargetID, PreparedTarget)? in
                 guard let parsedTarget = parseTarget(fromURI: target.uri) else {
                     logger.error("failed to extract scheme from target uri: \(target.uri)")
-                    continue
+                    return nil
+                }
+                return (target, parsedTarget)
+            }
+
+            let warmupSchemes = schemesRequiringWarmup(
+                preparedTargets: preparedTargets,
+                snapshot: initialRefresh.snapshot
+            )
+
+            var snapshot = initialRefresh.snapshot
+            if warmupSchemes.isEmpty == false {
+                for scheme in warmupSchemes {
+                    do {
+                        logger.debug("buildTarget/prepare warmup build started for scheme \(scheme)")
+                        try await graph.warmupBuild(forScheme: scheme)
+                        logger.debug("buildTarget/prepare warmup build completed for scheme \(scheme)")
+                    } catch {
+                        logger.error("buildTarget/prepare warmup build failed for scheme \(scheme): \(error)")
+                    }
                 }
 
+                let refreshed = try await graph.refresh(decoder: decoder, checkCache: true)
+                await state.recordRefreshChanges(refreshed)
+                snapshot = refreshed.snapshot
+            }
+
+            for (target, parsedTarget) in preparedTargets {
+
                 let lookupURI = canonicalTargetURI(scheme: parsedTarget.scheme, target: parsedTarget.target)
-                let optionsByFile = refresh.snapshot.optionsByTargetURI[target.uri] ?? refresh.snapshot.optionsByTargetURI[lookupURI] ?? [:]
+                let optionsByFile = snapshot.optionsByTargetURI[target.uri] ?? snapshot.optionsByTargetURI[lookupURI] ?? [:]
                 if optionsByFile.isEmpty {
                     logger.debug("buildTarget/prepare produced no compiler arguments for \(target.uri)")
                     continue
@@ -110,6 +136,65 @@ extension BuildTargetPrepare {
 
         let fallbackTarget = target.map { "&target=\($0)" } ?? ""
         return components.string ?? "xcode://\(projectName)?scheme=\(scheme)\(fallbackTarget)"
+    }
+
+    private func schemesRequiringWarmup(
+        preparedTargets: [(TargetID, PreparedTarget)],
+        snapshot: BuildGraphSnapshot
+    ) -> [String] {
+        var schemes: Set<String> = []
+
+        for (target, parsedTarget) in preparedTargets {
+            let lookupURI = canonicalTargetURI(scheme: parsedTarget.scheme, target: parsedTarget.target)
+            let optionsByFile = snapshot.optionsByTargetURI[target.uri] ?? snapshot.optionsByTargetURI[lookupURI] ?? [:]
+            guard optionsByFile.isEmpty == false else {
+                continue
+            }
+
+            /*
+            if optionsByFile.values.contains(where: { hasMissingCriticalPaths(arguments: $0.options) }) {
+            */
+                schemes.insert(parsedTarget.scheme)
+            /*
+            }
+            */
+        }
+
+        return schemes.sorted()
+    }
+
+    private func hasMissingCriticalPaths(arguments: [String]) -> Bool {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+
+            if argument == "-fmodule-map-file", index + 1 < arguments.count {
+                if FileManager.default.fileExists(atPath: arguments[index + 1]) == false {
+                    return true
+                }
+            } else if argument.hasPrefix("-fmodule-map-file=") {
+                let path = String(argument.dropFirst("-fmodule-map-file=".count))
+                if FileManager.default.fileExists(atPath: path) == false {
+                    return true
+                }
+            } else if argument == "-Xcc", index + 1 < arguments.count {
+                let wrapped = arguments[index + 1]
+                if wrapped == "-fmodule-map-file", index + 3 < arguments.count, arguments[index + 2] == "-Xcc" {
+                    if FileManager.default.fileExists(atPath: arguments[index + 3]) == false {
+                        return true
+                    }
+                } else if wrapped.hasPrefix("-fmodule-map-file=") {
+                    let path = String(wrapped.dropFirst("-fmodule-map-file=".count))
+                    if FileManager.default.fileExists(atPath: path) == false {
+                        return true
+                    }
+                }
+            }
+
+            index += 1
+        }
+
+        return false
     }
 }
 

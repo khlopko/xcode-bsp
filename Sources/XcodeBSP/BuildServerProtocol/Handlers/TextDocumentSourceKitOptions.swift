@@ -3,13 +3,13 @@ import Logging
 
 struct TextDocumentSourceKitOptions {
     let graph: BuildGraphService
-    let state: BuildSystemState
     let logger: Logger
+    let refreshTrigger: any RefreshTrigger
 
-    init(graph: BuildGraphService, state: BuildSystemState, logger: Logger) {
+    init(graph: BuildGraphService, logger: Logger, refreshTrigger: any RefreshTrigger) {
         self.graph = graph
-        self.state = state
         self.logger = logger
+        self.refreshTrigger = refreshTrigger
     }
 }
 
@@ -25,7 +25,7 @@ extension TextDocumentSourceKitOptions: MethodHandler {
         logger.trace(
             """
             sourceKitOptions request id=\(request.id) \
-            language=\(request.params.language) \
+            language=\(request.params.language ?? "nil") \
             target=\(targetURI) \
             documentURI=\(documentURI)
             """
@@ -40,6 +40,14 @@ extension TextDocumentSourceKitOptions: MethodHandler {
 
         let cachedSnapshot = try await graph.snapshot(decoder: decoder)
         if let options = cachedSnapshot.options(forFilePath: filePath, targetURI: targetURI) {
+            if hasMissingCriticalPaths(arguments: options.options) {
+                await refreshTrigger.requestRefresh(reason: "sourceKitOptions-stale-paths:\(targetURI)")
+                logger.trace(
+                    "sourceKitOptions request id=\(request.id) cache hit had missing critical paths; scheduled background refresh"
+                )
+                return Result(compilerArguments: [], workingDirectory: nil)
+            }
+
             logger.trace(
                 "sourceKitOptions request id=\(request.id) cache hit for target=\(targetURI) args=\(options.options.count)"
             )
@@ -57,36 +65,14 @@ extension TextDocumentSourceKitOptions: MethodHandler {
             """
         )
 
-        var refreshedSnapshot: BuildGraphSnapshot?
-
-        await state.beginUpdate()
-        do {
-            let refresh = try await graph.refresh(decoder: decoder, checkCache: false)
-            refreshedSnapshot = refresh.snapshot
-            await state.recordRefreshChanges(refresh)
-            await state.endUpdate()
-
-            if let options = refresh.snapshot.options(forFilePath: filePath, targetURI: targetURI) {
-                logger.trace(
-                    "sourceKitOptions request id=\(request.id) refresh hit for target=\(targetURI) args=\(options.options.count)"
-                )
-                return Result(compilerArguments: options.options, workingDirectory: options.workingDirectory)
-            }
-        } catch {
-            await state.endUpdate()
-            throw error
-        }
-
-        let refreshedCandidateTargets = refreshedSnapshot?.targetsByFilePath[filePath]
-            ?? refreshedSnapshot?.targetsByFilePath[resolvedFilePath]
-            ?? []
+        await refreshTrigger.requestRefresh(reason: "sourceKitOptions-miss:\(targetURI)")
         logger.trace(
             """
-            sourceKitOptions request id=\(request.id) returning empty result \
+            sourceKitOptions request id=\(request.id) returning empty result and scheduled background refresh \
             target=\(targetURI) \
             filePath=\(filePath) \
             resolvedFilePath=\(resolvedFilePath) \
-            candidateTargetsAfterRefresh=\(refreshedCandidateTargets)
+            candidateTargetsBeforeRefresh=\(candidateTargets)
             """
         )
 
@@ -96,7 +82,7 @@ extension TextDocumentSourceKitOptions: MethodHandler {
 
 extension TextDocumentSourceKitOptions {
     struct Params: Decodable {
-        let language: String
+        let language: String?
         let textDocument: TextDocument
         let target: TargetID
     }
@@ -122,5 +108,39 @@ extension TextDocumentSourceKitOptions {
         }
 
         return URL(filePath: url.path()).standardizedFileURL.path()
+    }
+
+    private func hasMissingCriticalPaths(arguments: [String]) -> Bool {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+
+            if argument == "-fmodule-map-file", index + 1 < arguments.count {
+                if FileManager.default.fileExists(atPath: arguments[index + 1]) == false {
+                    return true
+                }
+            } else if argument.hasPrefix("-fmodule-map-file=") {
+                let path = String(argument.dropFirst("-fmodule-map-file=".count))
+                if FileManager.default.fileExists(atPath: path) == false {
+                    return true
+                }
+            } else if argument == "-Xcc", index + 1 < arguments.count {
+                let wrapped = arguments[index + 1]
+                if wrapped == "-fmodule-map-file", index + 3 < arguments.count, arguments[index + 2] == "-Xcc" {
+                    if FileManager.default.fileExists(atPath: arguments[index + 3]) == false {
+                        return true
+                    }
+                } else if wrapped.hasPrefix("-fmodule-map-file=") {
+                    let path = String(wrapped.dropFirst("-fmodule-map-file=".count))
+                    if FileManager.default.fileExists(atPath: path) == false {
+                        return true
+                    }
+                }
+            }
+
+            index += 1
+        }
+
+        return false
     }
 }

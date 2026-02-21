@@ -52,7 +52,7 @@ final class BuildTargetPrepareTests: XCTestCase {
         )
 
         let stored = await db.args(filePath: filePath, scheme: "App")
-        XCTAssertEqual(stored, ["swiftc"])
+        XCTAssertEqual(stored, [])
     }
 
     func testPrepareUsesSchemeTargetScopeWhenTargetIsPresent() async throws {
@@ -98,7 +98,69 @@ final class BuildTargetPrepareTests: XCTestCase {
         )
 
         let stored = await db.args(filePath: filePath, scheme: "App::UnitTests")
-        XCTAssertEqual(stored, ["swiftc"])
+        XCTAssertEqual(stored, [])
+    }
+
+    func testPrepareTriggersWarmupBuildWhenModuleMapPathIsMissing() async throws {
+        let filePath = URL(filePath: "/tmp/Project/File.m").standardizedFileURL.path()
+        let missingModuleMapPath = "/tmp/Project/Derived/Generated.modulemap"
+        let refreshedArgs = ["clang", "-x", "objective-c", filePath]
+
+        let xcodebuild = StubXcodeBuildClient(
+            listResult: XcodeBuild.List(
+                project: XcodeBuild.List.Project(name: "Project", schemes: [], targets: [])
+            ),
+            settingsForIndexBySchemeAndCache: [
+                "App": [
+                    true: [
+                        "App": [
+                            filePath: XcodeBuild.FileSettings(
+                                swiftASTCommandArguments: nil,
+                                clangASTCommandArguments: ["clang", "-fmodule-map-file=\(missingModuleMapPath)", filePath],
+                                clangPCHCommandArguments: nil
+                            )
+                        ]
+                    ],
+                    false: [
+                        "App": [
+                            filePath: XcodeBuild.FileSettings(
+                                swiftASTCommandArguments: nil,
+                                clangASTCommandArguments: refreshedArgs,
+                                clangPCHCommandArguments: nil
+                            )
+                        ]
+                    ],
+                ]
+            ]
+        )
+        let graph = BuildGraphService(
+            xcodebuild: xcodebuild,
+            logger: makeTestLogger(),
+            configProvider: StaticConfigProvider(config: makeConfig(activeSchemes: ["App"]))
+        )
+        let db = InMemoryArgumentsStore()
+        let handler = BuildTargetPrepare(
+            graph: graph,
+            db: db,
+            logger: makeTestLogger(),
+            state: BuildSystemState()
+        )
+
+        _ = try await handler.handle(
+            request: Request(
+                id: "1",
+                method: handler.method,
+                params: BuildTargetPrepare.Params(
+                    targets: [TargetID(uri: "xcode://Project?scheme=App")]
+                )
+            ),
+            decoder: JSONDecoder()
+        )
+
+        let stored = await db.args(filePath: filePath, scheme: "App")
+        XCTAssertEqual(stored, ["-x", "objective-c", filePath])
+        XCTAssertEqual(xcodebuild.warmupBuildCalls, ["App"])
+        XCTAssertTrue(xcodebuild.settingsForIndexCalls.contains(where: { $0.checkCache == false }))
     }
 }
 

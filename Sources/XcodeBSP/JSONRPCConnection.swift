@@ -35,7 +35,7 @@ extension JSONRPCConnection {
     struct Message: Decodable {
         let method: String
 
-        let id: String?
+        let id: JSONRPCID?
 
         var isNotification: Bool {
             return id == nil
@@ -45,13 +45,7 @@ extension JSONRPCConnection {
             let container = try decoder.container(keyedBy: CodingKeys.self)
 
             method = try container.decode(String.self, forKey: .method)
-            if let id = try? container.decode(String.self, forKey: .id) {
-                self.id = id
-            } else if let id = try? container.decode(Int.self, forKey: .id) {
-                self.id = id.description
-            } else {
-                self.id = nil
-            }
+            id = try container.decodeIfPresent(JSONRPCID.self, forKey: .id)
         }
 
         private enum CodingKeys: CodingKey {
