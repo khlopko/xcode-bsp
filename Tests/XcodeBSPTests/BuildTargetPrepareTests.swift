@@ -104,31 +104,19 @@ final class BuildTargetPrepareTests: XCTestCase {
     func testPrepareTriggersWarmupBuildWhenModuleMapPathIsMissing() async throws {
         let filePath = URL(filePath: "/tmp/Project/File.m").standardizedFileURL.path()
         let missingModuleMapPath = "/tmp/Project/Derived/Generated.modulemap"
-        let refreshedArgs = ["clang", "-x", "objective-c", filePath]
 
         let xcodebuild = StubXcodeBuildClient(
             listResult: XcodeBuild.List(
                 project: XcodeBuild.List.Project(name: "Project", schemes: [], targets: [])
             ),
-            settingsForIndexBySchemeAndCache: [
+            settingsForIndexByScheme: [
                 "App": [
-                    true: [
-                        "App": [
-                            filePath: XcodeBuild.FileSettings(
-                                swiftASTCommandArguments: nil,
-                                clangASTCommandArguments: ["clang", "-fmodule-map-file=\(missingModuleMapPath)", filePath],
-                                clangPCHCommandArguments: nil
-                            )
-                        ]
-                    ],
-                    false: [
-                        "App": [
-                            filePath: XcodeBuild.FileSettings(
-                                swiftASTCommandArguments: nil,
-                                clangASTCommandArguments: refreshedArgs,
-                                clangPCHCommandArguments: nil
-                            )
-                        ]
+                    "App": [
+                        filePath: XcodeBuild.FileSettings(
+                            swiftASTCommandArguments: nil,
+                            clangASTCommandArguments: ["clang", "-fmodule-map-file=\(missingModuleMapPath)", filePath],
+                            clangPCHCommandArguments: nil
+                        )
                     ],
                 ]
             ]
@@ -158,9 +146,9 @@ final class BuildTargetPrepareTests: XCTestCase {
         )
 
         let stored = await db.args(filePath: filePath, scheme: "App")
-        XCTAssertEqual(stored, ["-x", "objective-c", filePath])
+        XCTAssertEqual(stored, ["-fmodule-map-file=\(missingModuleMapPath)", filePath])
         XCTAssertEqual(xcodebuild.warmupBuildCalls, ["App"])
-        XCTAssertTrue(xcodebuild.settingsForIndexCalls.contains(where: { $0.checkCache == false }))
+        XCTAssertFalse(xcodebuild.settingsForIndexCalls.contains(where: { $0.checkCache == false }))
     }
 }
 
