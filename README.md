@@ -37,7 +37,7 @@ Outgoing notifications:
 - `build/sourceKitOptionsChanged`
 
 ## install
-Use the setup script and interactive config command.
+Use the setup script, then generate project config with `xcode-bsp config`.
 
 1. Clone the repo.
 2. Run setup:
@@ -45,11 +45,19 @@ Use the setup script and interactive config command.
    ./build_release.sh
    ```
    This builds the release binary and installs a symlink to `/usr/local/bin/xcode-bsp`.
-3. In the root folder of your Xcode project, generate BSP config:
+3. In the root folder of your Xcode project, run:
    ```sh
    xcode-bsp config
    ```
-   The command asks which schemes to include as active build targets and writes `.bsp/xcode-bsp.json`.
+   The command:
+   - asks which schemes to include as active build targets,
+   - asks for executable path (defaults to detected current `xcode-bsp` path),
+   - writes `.bsp/xcode-bsp.json`.
+
+If you want to skip the executable-path prompt and set it explicitly:
+```sh
+xcode-bsp config --executable-path /absolute/path/to/xcode-bsp
+```
 
 `activeSchemes` is optional in config. If omitted or empty, `xcode-bsp` uses all schemes from
 `xcodebuild -list`.
@@ -58,7 +66,7 @@ Manual config is still supported. Example `.bsp/xcode-bsp.json`:
 ```json
 {
   "name": "xcode-bsp",
-  "argv": ["/usr/local/bin/xcode-bsp"],
+  "argv": ["/absolute/path/to/xcode-bsp"],
   "version": "0.2.0",
   "bspVersion": "2.0.0",
   "languages": ["swift", "objective-c", "objective-cpp"],
