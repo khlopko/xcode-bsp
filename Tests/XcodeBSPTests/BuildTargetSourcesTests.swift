@@ -79,9 +79,21 @@ final class BuildTargetSourcesTests: XCTestCase {
 
         XCTAssertEqual(result.items.count, 1)
         XCTAssertEqual(result.items[0].sources.map(\.uri), [URL(filePath: filePath).absoluteString])
+        func trimTrailingSlashes(_ path: String) -> String {
+            var value = path
+            while value.count > 1, value.hasSuffix("/") {
+                value.removeLast()
+            }
+            return value
+        }
+
+        let rootPaths = try result.items[0].roots.map { uri -> String in
+            let url = try XCTUnwrap(URL(string: uri))
+            return trimTrailingSlashes(URL(filePath: url.path()).standardizedFileURL.path())
+        }
         XCTAssertEqual(
-            result.items[0].roots,
-            [URL(filePath: "/tmp/Project/Sources").appending(path: "/").absoluteString]
+            rootPaths,
+            [trimTrailingSlashes("/tmp/Project/Sources")]
         )
     }
 }
