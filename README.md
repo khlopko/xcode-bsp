@@ -39,7 +39,7 @@ Use the setup script, then generate project config with `xcode-bsp config`.
    ```sh
    ./build_release.sh
    ```
-   This builds the release binary and installs a symlink to `/usr/local/bin/xcode-bsp`.
+   This builds the release binary, asks which directory to install `xcode-bsp` into, then copies the executable there.
 3. In the root folder of your Xcode project, run:
    ```sh
    xcode-bsp config
