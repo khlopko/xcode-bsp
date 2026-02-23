@@ -52,7 +52,7 @@ func shell(_ command: String, output: URL? = nil) throws -> ShellOutput {
     task.launchPath = "/bin/sh"
     task.standardInput = nil
 
-    task.launch()
+    try task.run()
 
     task.waitUntilExit()
  

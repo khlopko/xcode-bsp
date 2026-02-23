@@ -49,6 +49,9 @@ struct XcodeBSPApp: ParsableCommand {
                 }
             }
 
+            let workspaceContainerPath = try resolveConfiguredWorkspaceContainerPath()
+            print("Using workspace container: \(workspaceContainerPath)")
+
             let executablePath = try resolveConfiguredExecutablePath()
             print("Using executable path: \(executablePath)")
 
@@ -76,7 +79,9 @@ struct XcodeBSPApp: ParsableCommand {
                 version: "0.2.0",
                 bspVersion: "2.0.0",
                 languages: ["swift", "objective-c", "objective-cpp"],
-                activeSchemes: activeSchemes
+                activeSchemes: activeSchemes,
+                buildBackend: .swiftBuild,
+                workspaceContainerPath: workspaceContainerPath
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = .withoutEscapingSlashes
@@ -84,8 +89,15 @@ struct XcodeBSPApp: ParsableCommand {
             FileManager.default.createFile(atPath: configPath, contents: data)
             print("Saved BSP config to \(configPath)")
         case .server:
-            let server = try XcodeBuildServer(cacheDir: cacheDir)
-            server.run()
+            let config = try FileConfigProvider().load(decoder: JSONDecoder())
+            switch config.buildBackend {
+            case .swiftBuild:
+                let server = try SwiftBuildServerBackend(cacheDir: cacheDir, config: config)
+                try server.run()
+            case .xcodeBuild:
+                let server = try XcodeBuildServer(cacheDir: cacheDir)
+                server.run()
+            }
         }
     }
 }
@@ -128,6 +140,63 @@ private extension XcodeBSPApp {
         }
 
         return "/usr/local/bin/xcode-bsp"
+    }
+
+    func resolveConfiguredWorkspaceContainerPath(fileManager: FileManager = .default) throws -> String {
+        let candidates = try workspaceContainerCandidates(fileManager: fileManager)
+        guard candidates.isEmpty == false else {
+            throw ValidationError(
+                "No .xcworkspace or .xcodeproj found in the current directory. " +
+                "Run `xcode-bsp config` from a project root."
+            )
+        }
+
+        if candidates.count == 1 {
+            return candidates[0]
+        }
+
+        print("Choose workspace container for SwiftBuild:")
+        for (index, candidate) in candidates.enumerated() {
+            print("[\(index + 1)] \(candidate)")
+        }
+
+        print("Selection [1]", terminator: " ")
+        let input = (readLine() ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if input.isEmpty {
+            return candidates[0]
+        }
+
+        guard let selectedIndex = Int(input), candidates.indices.contains(selectedIndex - 1) else {
+            throw ValidationError("Invalid container selection: \(input)")
+        }
+
+        return candidates[selectedIndex - 1]
+    }
+
+    func workspaceContainerCandidates(fileManager: FileManager) throws -> [String] {
+        let cwd = URL(filePath: fileManager.currentDirectoryPath)
+        let contents = try fileManager.contentsOfDirectory(
+            at: cwd,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        let candidates = contents.compactMap { url -> String? in
+            let pathExtension = url.pathExtension.lowercased()
+            guard pathExtension == "xcworkspace" || pathExtension == "xcodeproj" else {
+                return nil
+            }
+            return url.lastPathComponent
+        }
+
+        return candidates.sorted { lhs, rhs in
+            let lhsIsWorkspace = lhs.lowercased().hasSuffix(".xcworkspace")
+            let rhsIsWorkspace = rhs.lowercased().hasSuffix(".xcworkspace")
+            if lhsIsWorkspace != rhsIsWorkspace {
+                return lhsIsWorkspace
+            }
+            return lhs.localizedStandardCompare(rhs) == .orderedAscending
+        }
     }
 
     func resolveExecutableCandidate(_ value: String, fileManager: FileManager) -> String? {

@@ -58,6 +58,16 @@ extension TextDocumentSourceKitOptions: MethodHandler {
         let candidateTargets = cachedSnapshot.targetsByFilePath[filePath]
             ?? cachedSnapshot.targetsByFilePath[resolvedFilePath]
             ?? []
+        logger.debug(
+            """
+            sourceKitOptions args cache miss \
+            request id=\(request.id) \
+            target=\(targetURI) \
+            filePath=\(filePath) \
+            resolvedFilePath=\(resolvedFilePath) \
+            candidateTargets=\(candidateTargets.count)
+            """
+        )
         logger.trace(
             """
             sourceKitOptions request id=\(request.id) cache miss for target=\(targetURI), refreshing \

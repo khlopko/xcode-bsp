@@ -155,16 +155,35 @@ extension XcodeBuild {
 
         if checkCache {
             if let data = withLock({ settingsForIndexMemoryCache[scheme] }) {
-                return (try? decoder.decode(SettingsForIndex.self, from: data)) ?? [:]
+                guard let decoded = try? decoder.decode(SettingsForIndex.self, from: data) else {
+                    logger.trace("settingsForIndex memory cache decode failed for scheme \(scheme); regenerating")
+                    return try settingsForIndex(forScheme: scheme, checkCache: false)
+                }
+
+                guard decoded.isEmpty == false else {
+                    logger.trace("settingsForIndex memory cache hit was empty for scheme \(scheme); regenerating")
+                    return try settingsForIndex(forScheme: scheme, checkCache: false)
+                }
+
+                return decoded
             }
 
             guard
                 let cachedData = try? Data(contentsOf: cacheURL),
-                cachedData.isEmpty == false,
-                let decoded = try? decoder.decode(SettingsForIndex.self, from: cachedData)
+                cachedData.isEmpty == false
             else {
-                logger.trace("settingsForIndex cache miss for scheme \(scheme)")
-                return [:]
+                logger.trace("settingsForIndex cache miss for scheme \(scheme); regenerating")
+                return try settingsForIndex(forScheme: scheme, checkCache: false)
+            }
+
+            guard let decoded = try? decoder.decode(SettingsForIndex.self, from: cachedData) else {
+                logger.trace("settingsForIndex cache decode failed for scheme \(scheme); regenerating")
+                return try settingsForIndex(forScheme: scheme, checkCache: false)
+            }
+
+            guard decoded.isEmpty == false else {
+                logger.trace("settingsForIndex cache hit was empty for scheme \(scheme); regenerating")
+                return try settingsForIndex(forScheme: scheme, checkCache: false)
             }
 
             withLock {
@@ -181,6 +200,9 @@ extension XcodeBuild {
         let settings = try decoder.decode(SettingsForIndex.self, from: data)
         withLock {
             settingsForIndexMemoryCache[scheme] = data
+        }
+        if settings.isEmpty {
+            logger.trace("settingsForIndex generated empty settings for scheme \(scheme)")
         }
         return settings
     }

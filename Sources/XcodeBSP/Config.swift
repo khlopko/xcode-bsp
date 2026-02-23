@@ -1,5 +1,10 @@
 import Foundation
 
+enum BuildBackend: String, Codable, Sendable {
+    case swiftBuild = "swiftbuild"
+    case xcodeBuild = "xcodebuild"
+}
+
 struct Config {
     let name: String
     let argv: [String]
@@ -7,6 +12,8 @@ struct Config {
     let bspVersion: String
     let languages: [String]
     let activeSchemes: [String]
+    let buildBackend: BuildBackend
+    let workspaceContainerPath: String?
 }
 
 extension Config: Codable {
@@ -17,6 +24,8 @@ extension Config: Codable {
         case bspVersion
         case languages
         case activeSchemes
+        case buildBackend
+        case workspaceContainerPath
     }
 
     init(from decoder: any Decoder) throws {
@@ -27,6 +36,8 @@ extension Config: Codable {
         bspVersion = try container.decode(String.self, forKey: .bspVersion)
         languages = try container.decode([String].self, forKey: .languages)
         activeSchemes = try container.decodeIfPresent([String].self, forKey: .activeSchemes) ?? []
+        buildBackend = try container.decodeIfPresent(BuildBackend.self, forKey: .buildBackend) ?? .swiftBuild
+        workspaceContainerPath = try container.decodeIfPresent(String.self, forKey: .workspaceContainerPath)
     }
 }
 
