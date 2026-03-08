@@ -15,7 +15,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-log", from: "1.6.0"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
         .package(url: "https://github.com/stephencelis/SQLite.swift.git", from: "0.15.4"),
-        .package(url: "https://github.com/khlopko/swift-build.git", branch: "xcode-bsp"),
+        .package(url: "https://github.com/khlopko/swift-build.git", revision: "a721f5f19702dbf251219b9fb907b967eba99da9"),
     ],
     targets: [
         .executableTarget(

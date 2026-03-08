@@ -1,10 +1,13 @@
 import Foundation
+import Logging
 
 struct WorkspaceBuildTargets {
     let graph: BuildGraphService
+    let logger: Logger
 
-    init(graph: BuildGraphService) {
+    init(graph: BuildGraphService, logger: Logger) {
         self.graph = graph
+        self.logger = logger
     }
 }
 
@@ -25,6 +28,8 @@ extension WorkspaceBuildTargets: MethodHandler {
                 dependencies: target.dependencies.map { TargetID(uri: $0) }
             )
         }
+
+        logger.debug("workspace/buildTargets returning \(targets.count) targets: \(targets)")
 
         return Result(targets: targets)
     }

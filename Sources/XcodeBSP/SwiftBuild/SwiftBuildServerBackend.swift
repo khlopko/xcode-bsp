@@ -116,10 +116,6 @@ extension SwiftBuildServerBackend {
                 session: session,
                 containerPath: containerPath,
                 buildRequest: buildRequest,
-                behaviorOptions: .init(
-                    autoPrepareBeforeSourceKitOptions: true,
-                    deduplicateBuildLogNotifications: true
-                ),
                 connectionToClient: transport,
                 exitHandler: { [weak self] code in
                     await self?.shutdownIfNeeded(exitCode: code)

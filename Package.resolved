@@ -1,5 +1,5 @@
 {
-  "originHash" : "ebd6b654408a602dd88642fd96fbdc7e93d8312ec35f3744d5cbceed34d6b5a2",
+  "originHash" : "50533438482a649026e130b3ca7cda7efe5c98b76578b840f619566e59123f6f",
   "pins" : [
     {
       "identity" : "sqlite.swift",
@@ -24,8 +24,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/khlopko/swift-build.git",
       "state" : {
-        "branch" : "xcode-bsp",
-        "revision" : "38bfa00712b445f929fb0fa3884ba00a28070a63"
+        "revision" : "a721f5f19702dbf251219b9fb907b967eba99da9"
       }
     },
     {

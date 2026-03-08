@@ -47,7 +47,7 @@ final class XcodeBuildServer: Sendable {
                 BuildInitialize(graph: graph, cacheDir: cacheDir),
                 BuildShutdown(state: state),
                 TextDocumentRegisterForChanges(state: state),
-                WorkspaceBuildTargets(graph: graph),
+                WorkspaceBuildTargets(graph: graph, logger: logger),
                 BuildTargetPrepare(graph: graph, db: db, logger: logger, state: state),
                 BuildTargetSources(graph: graph),
                 BuildTargetInverseSources(graph: graph),
